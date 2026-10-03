@@ -31,10 +31,11 @@ async def create_user(db: AsyncSession, user_data: UserLoginSchema) -> UserTabel
     """
     # 先密码加密
     hashed_password = hash_password(user_data.password)
-    # 再创建用户
+    # 再创建用户（正式注册统一进 vip 分组，可调用全部分组模型；访客走 create_guest_user 进 free）
     user = UserTabel(
         username=user_data.username,
         password=hashed_password,
+        user_group="vip",
     )
     db.add(user)  # 这里不使用await，因为add方法是同步的
     await db.commit()
@@ -145,6 +146,7 @@ async def create_guest_user(db: AsyncSession) -> UserTabel:
         password=hash_password(secrets.token_urlsafe(16)),
         nickname=f"访客{suffix[:4]}",  # 导航栏展示用，比guest_xxxx友好
         is_guest=True,
+        user_group="free",  # 访客显式固定 free 分组（仅免费模型），与正式注册的 vip 区分
     )
     db.add(user)
     await db.commit()
