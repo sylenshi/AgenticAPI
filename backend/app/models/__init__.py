@@ -10,6 +10,7 @@ from app.models.llm_model import ModelsTable
 from app.models.llm_channel import ChannelsTable
 from app.models.user import UserTabel, UserTokenTabel
 from app.models.api_key import ApiKeyTable
+from app.models.redeem_code import RedeemCodeTable
 from app.models.log import LogsTable
 from app.models.chat_record import ChatRecordTable
 from app.models.usage_stats import UsageStatsTable
@@ -19,6 +20,6 @@ from app.models.system_config import SystemConfigTable
 
 __all__ = [
     "BaseModel", "ModelsTable", "ChannelsTable",
-    "UserTabel", "UserTokenTabel", "ApiKeyTable", "LogsTable",
+    "UserTabel", "UserTokenTabel", "ApiKeyTable", "RedeemCodeTable", "LogsTable",
     "ChatRecordTable", "UsageStatsTable", "UsageSummaryTable", "SystemConfigTable",
 ]

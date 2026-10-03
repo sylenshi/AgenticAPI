@@ -45,13 +45,13 @@ const isActive = (path: string) => {
 }
 
 // 按角色过滤侧边栏：
-// - 概览/秘钥：所有登录用户可见（访客与普通用户同权限）
+// - 概览/秘钥/兑换：所有登录用户可见（访客与普通用户同权限，兑换页内管理区块按角色分支）
 // - 渠道/运营/用户：仅管理员可见
-// - 兑换/安全：功能尚未实现，暂时隐藏
+// - 安全：功能尚未实现，暂时隐藏
 const visibleDashItems = computed(() => {
-  const adminPaths = ['/dashboard/channels', '/dashboard/operations', '/dashboard/userlist', '/dashboard/redemptioncodes', '/dashboard/security']
+  const adminPaths = ['/dashboard/channels', '/dashboard/operations', '/dashboard/userlist', '/dashboard/security']
   return dashItems.filter(item => {
-    if (item.to === '/dashboard/overview' || item.to === '/dashboard/keys') return true
+    if (item.to === '/dashboard/overview' || item.to === '/dashboard/keys' || item.to === '/dashboard/redemptioncodes') return true
     if (adminPaths.includes(item.to)) return userStore.isAdmin
     return false
   })

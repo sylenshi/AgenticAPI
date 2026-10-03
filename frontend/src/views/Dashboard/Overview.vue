@@ -56,15 +56,15 @@
       </a-form>
     </section>
 
-    <!-- 兑换码充值入口（占位卡片，功能待上线） -->
+    <!-- 余额充值入口：跳转兑换码页面（兑换的唯一入口） -->
     <section class="page-card redeem-card">
       <h3 class="card-title">余额充值</h3>
       <p class="redeem-tip">
         余额用于调用中转接口时按量计费（输入/缓存/输出 token 分别计价，详见模型广场各模型定价）。
       </p>
-      <a-button @click="showRedeemComingSoon">
+      <a-button type="primary" @click="goRedeem">
         <template #icon><icon-gift/></template>
-        购买兑换码
+        去兑换
       </a-button>
     </section>
   </div>
@@ -73,6 +73,7 @@
 <script setup lang="ts">
 import {computed, onMounted, reactive, ref} from 'vue'
 import {Message} from '@arco-design/web-vue'
+import {useRouter} from 'vue-router'
 import {useUserStore} from '@/stores/user'
 import {updateProfile} from '@/api/user'
 import {getErrorMessage} from '@/api/request'
@@ -107,9 +108,11 @@ async function handleSaveProfile() {
   }
 }
 
-// 兑换码功能占位提示
-function showRedeemComingSoon() {
-  Message.info('该功能即将上线，敬请期待')
+// 兑换码充值：跳转兑换页（站内唯一兑换入口）
+const router = useRouter()
+
+function goRedeem() {
+  router.push('/dashboard/redemptioncodes')
 }
 
 onMounted(() => {
