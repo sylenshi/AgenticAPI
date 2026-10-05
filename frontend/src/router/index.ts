@@ -17,6 +17,7 @@ import UserList from '@/views/Dashboard/UserList.vue'
 import RedemptionCodes from '@/views/Dashboard/RedemptionCodes.vue'
 import Operations from '@/views/Dashboard/Operations.vue'
 import Security from '@/views/Dashboard/Security.vue'
+import AgentChat from '@/views/Dashboard/AgentChat.vue'
 
 const router = createRouter({
     history: createWebHistory(), // 历史模式
@@ -102,6 +103,13 @@ const router = createRouter({
                     name: 'Operations',
                     path: 'operations',
                     component: Operations,
+                    meta: { requiresAdmin: true }
+                },
+                {
+                    name: 'AgentChat',
+                    path: 'agent',
+                    component: AgentChat,
+                    // 站点维护 Agent（对话式运维：白名单工具 + 人审阀门），仅管理员
                     meta: { requiresAdmin: true }
                 },
                 {

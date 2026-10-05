@@ -28,3 +28,11 @@ export type {
     studioParams,
 } from './studio'
 export { DEFAULT_STUDIO_PARAMS } from './studio'
+export type {
+    agentStreamEvent,
+    agentToolEvent,
+    agentConfirmState,
+    agentDownload,
+    agentSession,
+    agentServerMessage,
+} from './agent'

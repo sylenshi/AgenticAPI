@@ -18,6 +18,16 @@
 
                     <!-- 助手消息：左侧 markdown 渲染 -->
                     <div v-else class="bubble assistant-bubble">
+                        <!-- 维护 Agent：工具执行状态条（running/进度/终态摘要） -->
+                        <ToolStatusBar v-if="msg.toolEvents?.length" :events="msg.toolEvents"/>
+
+                        <!-- 维护 Agent：审批卡片（L1/L2 写操作人审，工坊消息恒无此字段） -->
+                        <ApprovalCard v-if="msg.confirm" :confirm="msg.confirm"
+                                      @resolve="(approved: boolean) => handleApprove(msg, approved)"/>
+
+                        <!-- 维护 Agent：导出文件下载卡片 -->
+                        <DownloadCard v-for="dl in msg.downloads" :key="dl.url" :download="dl"/>
+
                         <!-- 联网搜索状态条：搜索中显示关键词，完成后显示累计次数 -->
                         <div v-if="msg.searches?.length" class="search-status" :class="{searching: searchingQuery(msg) !== null}">
                             <span v-if="searchingQuery(msg) !== null" class="search-spinner"></span>
@@ -81,13 +91,20 @@ import {nextTick, ref, reactive, watch, computed} from 'vue'
 import {Message} from '@arco-design/web-vue'
 import MarkdownIt from 'markdown-it'
 import type {studioMessage} from '@/types'
+import ToolStatusBar from '@/components/agent/ToolStatusBar.vue'
+import ApprovalCard from '@/components/agent/ApprovalCard.vue'
+import DownloadCard from '@/components/agent/DownloadCard.vue'
 
 const props = defineProps<{
     messages: studioMessage[]
     isStreaming: boolean
 }>()
 
-const emit = defineEmits<{ regenerate: [] }>()
+const emit = defineEmits<{
+    regenerate: []
+    /** 维护 Agent 审批卡片按钮（工坊不会触发：其消息没有 confirm 字段） */
+    approveTool: [payload: { approvalId: string; approved: boolean }]
+}>()
 
 // markdown 渲染器（默认 html:false 会转义原文标签，防 XSS）
 const md = new MarkdownIt({breaks: true})
@@ -114,6 +131,13 @@ function toggleReasoning(id: string) {
 function searchingQuery(msg: studioMessage): string | null {
     const running = msg.searches?.find(s => s.status === 'running')
     return running ? running.query : null
+}
+
+/** ═══════════ 维护 Agent 审批转发（向上冒泡给页面调审批端点） ═══════════ */
+function handleApprove(msg: studioMessage, approved: boolean) {
+    if (msg.confirm) {
+        emit('approveTool', {approvalId: msg.confirm.approvalId, approved})
+    }
 }
 
 /** ═══════════ 复制 ═══════════ */
