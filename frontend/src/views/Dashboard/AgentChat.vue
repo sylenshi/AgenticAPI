@@ -14,9 +14,7 @@
                     :disabled="agentStore.isStreaming"
                     @change="(v: any) => agentStore.patchSession({modelName: String(v)})">
             <a-option v-for="m in availableModels" :key="m.name" :value="m.name">
-              <span class="model-name-text">{{ m.name }}</span>
-              <span class="model-group-tag">{{ m.label }}</span>
-              <span class="model-group-tag">{{ m.modelGroup }}</span>
+              {{ m.name }}
             </a-option>
           </a-select>
         </header>
@@ -332,17 +330,6 @@ async function confirmRemove(sessionId: number) {
   padding: 1px 8px;
   border-radius: var(--radius-sm);
   flex-shrink: 0;
-}
-
-.model-name-text {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-}
-
-.model-group-tag {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  margin-left: 6px;
 }
 
 .chat-empty {
