@@ -234,7 +234,8 @@ async function confirmClear() {
   gap: var(--space-2);
 }
 
-.session-actions > * {
+/* 新建会话占满剩余宽度，清空按内容自适应收窄 */
+.session-actions > :first-child {
   flex: 1 1 0;
   min-width: 0;
 }
