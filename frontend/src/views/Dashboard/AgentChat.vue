@@ -85,9 +85,9 @@
       <div class="panel-section">
         <div class="panel-title">风险等级</div>
         <div class="risk-legend">
-          <div class="risk-item"><span class="risk-dot l0"></span>L0 只读：直接执行</div>
-          <div class="risk-item"><span class="risk-dot l1"></span>L1 低危写：审批卡片（可自动批准）</div>
-          <div class="risk-item"><span class="risk-dot l2"></span>L2 高危写：强审批 + 两段式 dry-run</div>
+          <div class="risk-item"><span class="risk-dot l0"></span>L0 只读工具</div>
+          <div class="risk-item"><span class="risk-dot l1"></span>L1 低危工具</div>
+          <div class="risk-item"><span class="risk-dot l2"></span>L2 高危工具</div>
         </div>
       </div>
 
