@@ -208,11 +208,11 @@ async function confirmRemove(sessionId: number) {
   min-width: 0;
 }
 
-/* ── 会话列表（右栏内）：透明滚动容器只露最近 5 条，更早的在容器内滚动查找 ── */
+/* ── 会话列表（右栏卡片内）：固定条目高度 + 滚轮容器，恰好露出最近 5 条，更早的滚动查找 ── */
 .session-list-scroll {
   margin-top: var(--space-2);
-  /* 5 × 单行条目（6+6 padding + 21 行高 + 2 边框 = 35px）+ 4 × 4px 间距 = 191px */
-  max-height: 192px;
+  /* 与 .session-item 固定高 36px 联动：5 条 + 4 个 4px 间距（滚动条为全局细灰样式） */
+  max-height: calc(36px * 5 + 4px * 4);
   overflow-y: auto;
 }
 
@@ -224,7 +224,11 @@ async function confirmRemove(sessionId: number) {
 
 .session-item {
   position: relative;
-  padding: 6px 10px;
+  height: 36px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 26px 0 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-white);
@@ -242,10 +246,10 @@ async function confirmRemove(sessionId: number) {
 }
 
 .session-title {
+  flex: 1;
+  min-width: 0;
   font-size: var(--text-sm);
-  line-height: 21px;
   color: var(--color-text);
-  padding-right: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -253,8 +257,9 @@ async function confirmRemove(sessionId: number) {
 
 .session-delete {
   position: absolute;
-  top: 5px;
+  top: 50%;
   right: 6px;
+  transform: translateY(-50%);
   display: none;
   border: none;
   background: none;
@@ -439,11 +444,14 @@ async function confirmRemove(sessionId: number) {
 
 .help-actions {
   display: flex;
+  flex-direction: row;
   gap: var(--space-2);
 }
 
-.help-actions :deep(.arco-btn) {
-  flex: 1;
+/* 两个按钮各占一半宽，恒一行排布（子组件根元素继承本组件 scope 属性） */
+.help-actions > * {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 /* 帮助弹窗 markdown 渲染（v-html 内容不吃 scoped，需 :deep 穿透） */
