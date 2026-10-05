@@ -158,11 +158,14 @@ export const useAgentStore = defineStore('agent', () => {
             id: genStudioId(), role: 'user', content: content.trim(),
             createTime: Date.now(),
         })
-        const assistant: studioMessage = {
+        messages.value.push({
             id: genStudioId(), role: 'assistant', content: '',
             toolEvents: [], createTime: Date.now(),
-        }
-        messages.value.push(assistant)
+        })
+        // 必须从响应式数组读回代理再持有：直改 push 前的原始对象不触发重渲染，
+        // 且 alive() 的全等比较只有代理对代理才成立（否则流式回调全部被守卫拦掉）
+        const assistant = messages.value[messages.value.length - 1]
+        if (!assistant) return
         isStreaming.value = true
         abortController = new AbortController()
         const startMs = Date.now()
