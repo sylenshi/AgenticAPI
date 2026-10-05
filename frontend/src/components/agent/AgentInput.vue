@@ -2,7 +2,7 @@
 <template>
   <div class="agent-input">
     <textarea ref="textareaRef" v-model="text" class="input-textarea"
-              placeholder="向维护 Agent 下达指令，例如：测一下所有渠道连通性 / 出一份巡检报告 / 导出并清理三个月前的对话记录…"
+              placeholder="向 Agent 下达运维指令…"
               rows="2" :disabled="isStreaming"
               @input="autoResize" @keydown="handleKeydown"
               @compositionstart="handleCompositionStart" @compositionend="handleCompositionEnd"/>

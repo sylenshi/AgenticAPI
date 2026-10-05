@@ -104,23 +104,12 @@
       </div>
     </aside>
 
-    <!-- 使用提示 / 安全提示弹窗 -->
-    <a-modal v-model:visible="usageVisible" title="使用提示" :width="520" :footer="false">
-      <ul class="modal-tips">
-        <li>大脑模型走你的个人账户计费，右侧可随时切换站内任意模型（下一轮生效）</li>
-        <li>复合运维任务直接一句话下达，如「出一份巡检报告」「测一遍所有渠道」</li>
-        <li>内置巡检 / 排障 / 数据治理等 SOP，也可在会话中教它新技能（保存与删除均需审批）</li>
-        <li>导出结果以一次性下载链接返回（24 小时有效，仅可下载一次）</li>
-        <li>清理数据表务必先查看 dry-run 预览，确认影响行数后再批准真删</li>
-      </ul>
+    <!-- 使用提示 / 安全提示弹窗（markdown 渲染） -->
+    <a-modal v-model:visible="usageVisible" title="使用提示" :width="560" :footer="false">
+      <div class="help-md" v-html="usageHtml"></div>
     </a-modal>
-    <a-modal v-model:visible="safetyVisible" title="安全提示" :width="520" :footer="false">
-      <ul class="modal-tips">
-        <li>27 个工具按风险三级管控：L0 只读直接执行；L1 低危写弹审批卡片，可开会话级自动批准；L2 高危写强制人工审批且每会话最多 5 次</li>
-        <li>关闭右侧「L2 高危工具」即进入只读模式，高危工具不会注入给模型</li>
-        <li>渠道密钥全程递归脱敏，展示与落库均只有掩码，数据库与前端不存密钥原文</li>
-        <li>每一次工具调用与审批决定（含拒绝、超时）都写入审计日志，可在监控页追溯</li>
-      </ul>
+    <a-modal v-model:visible="safetyVisible" title="安全提示" :width="560" :footer="false">
+      <div class="help-md" v-html="safetyHtml"></div>
     </a-modal>
   </div>
 </template>
@@ -128,6 +117,7 @@
 <script setup lang="ts">
 import {computed, onMounted, ref} from 'vue'
 import {Message} from '@arco-design/web-vue'
+import MarkdownIt from 'markdown-it'
 import ChatMessages from '@/components/studio/ChatMessages.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
 import {useAgentStore} from '@/stores/agent'
@@ -140,6 +130,44 @@ const loading = ref(false)
 /** 使用提示 / 安全提示弹窗开关 */
 const usageVisible = ref(false)
 const safetyVisible = ref(false)
+
+// 帮助弹窗内容（markdown）：html:false 转义原文标签防 XSS，与工坊消息渲染同一配置
+const md = new MarkdownIt({breaks: true})
+const usageHtml = md.render(`
+### 对话与计费
+- **大脑模型**：由当前会话选定的模型驱动，每次调用按站点定价计入**你的管理员余额**（免费模型不扣费）；调用流水可在「监控面板 → 调用日志」按关键字 *维护Agent* 对账
+- **随时换脑**：右上角选择器可切换站内任意启用模型，**下一轮生效**，上下文不丢失
+
+### 怎么下达任务
+- 一句话描述目标即可，无需拆步骤：\`出一份巡检报告\`、\`测一遍所有渠道\`、\`glm-5.3 最近一周调用趋势怎么样\`
+- 复合任务它会自己规划多步：\`检查所有模型可用性，然后告诉我哪些渠道有问题\`
+
+### 内置技能（SOP）
+- 已内置六个运维 SOP：**站点巡检 / 数据治理 / 渠道排障 / 额度水位研判 / 新模型上线 / 故障复盘**，自然语言即可触发
+- **教它新技能**：口述内容让它保存（"记住一个叫 xxx 的技能：……"）；保存与删除都弹审批卡片，**开启 L1 自动批准也不豁免**
+
+### 数据导出与清理
+- 导出（对话记录 / 日志 / 统计表）返回**一次性下载链接**：24 小时有效、仅可下载一次，请及时保存
+- 清理走**两段式**：先 dry-run 预览将删的行数与时间范围 → 你批准后才真删；可先导出备份再清理
+`)
+const safetyHtml = md.render(`
+### 工具风险分级（共 27 个白名单工具）
+| 等级 | 范围 | 执行方式 |
+| --- | --- | --- |
+| **L0 只读**（19 个） | 巡检 / 统计 / 拨测 / 查询 / 切模型 | 直接执行，不打扰 |
+| **L1 低危写**（5 个） | 渠道改配置 / 数据导出 / 技能保存删除 | 弹审批卡片，可开**会话级自动批准** |
+| **L2 高危写**（3 个） | 数据表清理（日志 / 对话记录 / 统计） | **强制人工审批**，无法自动批准 |
+
+### 硬性护栏
+- L2 每会话**最多 5 次**真删；审批卡片 **300 秒**未操作自动按拒绝处理
+- 关闭右侧「L2 高危工具」即进入**只读模式**：高危工具根本不会注入给模型，它"不知道"有这些工具
+- 单轮对话上限 24 次工具调用、上下文 200k token，超限自动收敛结束
+
+### 密钥与审计
+- 渠道密钥**全程递归脱敏**：界面只显示掩码（如 \`sk-1****wxyz\`），数据库与前端均不存密钥原文
+- **双轨留痕**：每次工具调用（参数 + 结果摘要）与每次审批决定（批准 / 拒绝 / 超时）均写入审计日志，可在「监控面板 → 调用日志」按管理员筛选追溯
+- 它没有 shell、没有任意命令执行、没有通用文件访问，只能调用上表中的白名单工具
+`)
 
 /** 模型选择器数据：站内启用中的出站模型（管理员 vip 全量可用） */
 const availableModels = computed(() =>
@@ -426,12 +454,69 @@ async function confirmRemove(sessionId: number) {
   gap: var(--space-2);
 }
 
-.modal-tips {
-  margin: 0;
-  padding-left: 1.2em;
+/* 帮助弹窗 markdown 渲染（v-html 内容不吃 scoped，需 :deep 穿透） */
+.help-md {
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
-  line-height: 2;
+  line-height: 1.8;
+}
+
+.help-md :deep(h3) {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+  margin: 14px 0 6px;
+}
+
+.help-md :deep(h3:first-child) {
+  margin-top: 2px;
+}
+
+.help-md :deep(ul) {
+  margin: 4px 0;
+  padding-left: 1.3em;
+}
+
+.help-md :deep(li) {
+  margin: 4px 0;
+}
+
+.help-md :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-gray-100);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+
+.help-md :deep(strong) {
+  color: var(--color-text);
+}
+
+.help-md :deep(em) {
+  color: var(--color-text);
+  font-style: normal;
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.help-md :deep(table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+  width: 100%;
+}
+
+.help-md :deep(th),
+.help-md :deep(td) {
+  border: 1px solid var(--color-border);
+  padding: 5px 8px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.help-md :deep(th) {
+  background: var(--color-gray-100);
+  color: var(--color-text);
+  font-weight: var(--font-medium);
 }
 
 /* 窄屏：右侧面板收纳到底部（简单响应式） */

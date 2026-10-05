@@ -16,7 +16,7 @@ import {getErrorMessage} from '@/api/request'
 import type {agentSession, agentStreamEvent, studioMessage} from '@/types'
 import {genStudioId} from '@/stores/studio'
 
-/** 服务端历史 → UI 消息（工具轨迹折叠为 assistant 消息的 toolEvents） */
+/** 服务端历史 → UI 消息（按时序逐轮还原：文本轮与工具轮各成一个气泡，保持先后顺序） */
 function mapHistory(rows: {
     id: number
     role: string
@@ -34,13 +34,13 @@ function mapHistory(rows: {
                 createTime: new Date(row.createTime).getTime(),
             })
         } else if (row.role === 'assistant') {
-            // 带工具调用的中间轮不渲染正文（content 为空），只承载后续工具结果
+            // 每条 assistant 轮一个气泡：有正文的是文本轮；空正文的是工具调用轮，承接后续 tool 行
             out.push({
                 id: `srv-${row.id}`, role: 'assistant', content: row.content || '',
                 createTime: new Date(row.createTime).getTime(),
             })
         } else if (row.role === 'tool') {
-            // 找最后一个 assistant 消息挂工具事件（历史回放只有终态）
+            // 历史回放只有终态：挂到最近一个 assistant 气泡（即本轮工具轮）
             let summary = ''
             try {
                 const parsed = JSON.parse(row.content || '{}')
@@ -49,8 +49,8 @@ function mapHistory(rows: {
                 summary = '已执行'
             }
             const toolName = findToolNameFor(rows, row.id)
-            const target = [...out].reverse().find(m => m.role === 'assistant')
-            if (target) {
+            const target = out[out.length - 1]
+            if (target && target.role === 'assistant') {
                 target.toolEvents = target.toolEvents || []
                 target.toolEvents.push({
                     id: `srv-tool-${row.id}`, tool: toolName, status: 'done',
@@ -158,43 +158,138 @@ export const useAgentStore = defineStore('agent', () => {
             id: genStudioId(), role: 'user', content: content.trim(),
             createTime: Date.now(),
         })
-        messages.value.push({
-            id: genStudioId(), role: 'assistant', content: '',
-            toolEvents: [], createTime: Date.now(),
-        })
-        // 必须从响应式数组读回代理再持有：直改 push 前的原始对象不触发重渲染，
-        // 且 alive() 的全等比较只有代理对代理才成立（否则流式回调全部被守卫拦掉）
-        const assistant = messages.value[messages.value.length - 1]
-        if (!assistant) return
+
+        // 一轮回复按「文本段 / 工具段」拆成多个 assistant 气泡，保持时序：
+        // 文本与思维链写进当前气泡；工具调用开新气泡承接，工具结束后的正文再开新气泡
+        function openBubble(): studioMessage {
+            messages.value.push({
+                id: genStudioId(), role: 'assistant', content: '',
+                toolEvents: [], createTime: Date.now(),
+            })
+            // 必须从响应式数组读回代理再持有：直改 push 前的原始对象不触发重渲染
+            const bubble = messages.value[messages.value.length - 1]
+            if (!bubble) throw new Error('assistant 气泡创建失败')
+            return bubble
+        }
+
+        let current = openBubble()
         isStreaming.value = true
         abortController = new AbortController()
-        const startMs = Date.now()
-        // 直接持有 assistant 对象引用流式回写（对象在数组内原地变更，响应式生效）
-        const alive = () => messages.value[messages.value.length - 1] === assistant
+        // 流式期间有效：被停止或切换了会话即失效
+        const alive = () => isStreaming.value && currentSession.value?.sessionId === sessionId
+
+        /** 文本/思维链落笔前的分段：当前气泡已承载过工具时新开一段 */
+        function ensureTextBubble(): studioMessage {
+            if (current.toolEvents?.length) current = openBubble()
+            return current
+        }
+
+        /** 工具事件落笔前的分段：当前气泡已有正文/思维链时新开一段（同轮并行工具共用一个气泡） */
+        function ensureToolBubble(): studioMessage {
+            if (current.content || current.reasoning) current = openBubble()
+            return current
+        }
+
+        function handleAgentEvent(ev: agentStreamEvent) {
+            if (!alive()) return
+            switch (ev.type) {
+                case 'tool_start': {
+                    const bubble = ensureToolBubble()
+                    bubble.toolEvents = bubble.toolEvents || []
+                    bubble.toolEvents.push({
+                        id: genStudioId(), tool: ev.tool, status: 'running', digest: ev.digest,
+                    })
+                    break
+                }
+                case 'tool_progress': {
+                    const events = current.toolEvents || []
+                    const last = events[events.length - 1]
+                    if (last && last.tool === ev.tool) last.progress = {done: ev.done, total: ev.total}
+                    break
+                }
+                case 'tool_end': {
+                    const events = current.toolEvents || []
+                    for (let i = events.length - 1; i >= 0; i--) {
+                        const item = events[i]
+                        if (item && item.tool === ev.tool && item.status === 'running') {
+                            item.status = ev.ok ? 'done' : 'failed'
+                            item.summary = ev.summary
+                            item.progress = undefined
+                            break
+                        }
+                    }
+                    break
+                }
+                case 'confirm_required': {
+                    current.confirm = {
+                        approvalId: ev.approvalId, tool: ev.tool, args: ev.args,
+                        impact: ev.impact, riskLevel: ev.riskLevel,
+                        status: 'pending', expiresIn: ev.expiresIn,
+                    }
+                    break
+                }
+                case 'confirm_resolved': {
+                    for (const m of messages.value) {
+                        if (m.confirm?.approvalId === ev.approvalId) {
+                            m.confirm.status = ev.result
+                        }
+                    }
+                    break
+                }
+                case 'model_switched': {
+                    const session = sessions.value.find(s => s.sessionId === currentSessionId.value)
+                    if (session) session.modelName = ev.to
+                    Message.info(`驱动模型已切换：${ev.from} → ${ev.to}`)
+                    break
+                }
+                case 'round_end': {
+                    if (!current.usage) {
+                        current.usage = {
+                            promptTokens: ev.usageSoFar.promptTokens,
+                            completionTokens: ev.usageSoFar.completionTokens,
+                            elapsedMs: Date.now() - current.createTime,
+                        }
+                    }
+                    break
+                }
+                case 'download_ready': {
+                    current.downloads = current.downloads || []
+                    current.downloads.push({url: ev.url, label: ev.label, size: ev.size, expiresAt: ev.expiresAt})
+                    break
+                }
+            }
+        }
 
         try {
             await streamAgentChat(sessionId, content.trim(), {
                 onChunk: (text) => {
-                    if (alive()) assistant.content += text
+                    if (!alive()) return
+                    const bubble = ensureTextBubble()
+                    bubble.content += text
                 },
                 onReasoning: (text) => {
-                    if (alive()) assistant.reasoning = (assistant.reasoning || '') + text
+                    if (!alive()) return
+                    const bubble = ensureTextBubble()
+                    bubble.reasoning = (bubble.reasoning || '') + text
                 },
                 onUsage: (usage) => {
-                    if (alive()) {
-                        assistant.usage = {
-                            promptTokens: usage.promptTokens,
-                            completionTokens: usage.completionTokens,
-                            elapsedMs: Date.now() - startMs,
-                        }
+                    if (!alive()) return
+                    current.usage = {
+                        promptTokens: usage.promptTokens,
+                        completionTokens: usage.completionTokens,
+                        elapsedMs: Date.now() - current.createTime,
                     }
                 },
-                onAgentEvent: (ev) => handleAgentEvent(ev, assistant),
+                onAgentEvent: handleAgentEvent,
                 onError: (msg) => {
-                    if (alive()) assistant.error = msg
+                    if (alive()) current.error = msg
                 },
             }, abortController.signal)
         } finally {
+            // 清理本轮完全空的气泡（如出错前未收到任何内容；有任一有效载荷的都保留）
+            messages.value = messages.value.filter(m =>
+                m.role !== 'assistant' || m.content || m.reasoning || m.toolEvents?.length ||
+                m.confirm || m.downloads?.length || m.error || m.usage)
             isStreaming.value = false
             abortController = null
             // 首次对话后自动起标题（复用工坊标题接口）
@@ -206,74 +301,6 @@ export const useAgentStore = defineStore('agent', () => {
                 } catch {
                     // 标题失败不打扰
                 }
-            }
-        }
-    }
-
-    function handleAgentEvent(ev: agentStreamEvent, assistant: studioMessage) {
-        switch (ev.type) {
-            case 'tool_start': {
-                assistant.toolEvents = assistant.toolEvents || []
-                assistant.toolEvents.push({
-                    id: genStudioId(), tool: ev.tool, status: 'running', digest: ev.digest,
-                })
-                break
-            }
-            case 'tool_progress': {
-                const events = assistant.toolEvents || []
-                const last = events[events.length - 1]
-                if (last && last.tool === ev.tool) last.progress = {done: ev.done, total: ev.total}
-                break
-            }
-            case 'tool_end': {
-                const events = assistant.toolEvents || []
-                for (let i = events.length - 1; i >= 0; i--) {
-                    const item = events[i]
-                    if (item && item.tool === ev.tool && item.status === 'running') {
-                        item.status = ev.ok ? 'done' : 'failed'
-                        item.summary = ev.summary
-                        item.progress = undefined
-                        break
-                    }
-                }
-                break
-            }
-            case 'confirm_required': {
-                assistant.confirm = {
-                    approvalId: ev.approvalId, tool: ev.tool, args: ev.args,
-                    impact: ev.impact, riskLevel: ev.riskLevel,
-                    status: 'pending', expiresIn: ev.expiresIn,
-                }
-                break
-            }
-            case 'confirm_resolved': {
-                for (const m of messages.value) {
-                    if (m.confirm?.approvalId === ev.approvalId) {
-                        m.confirm.status = ev.result
-                    }
-                }
-                break
-            }
-            case 'model_switched': {
-                const session = sessions.value.find(s => s.sessionId === currentSessionId.value)
-                if (session) session.modelName = ev.to
-                Message.info(`驱动模型已切换：${ev.from} → ${ev.to}`)
-                break
-            }
-            case 'round_end': {
-                if (!assistant.usage) {
-                    assistant.usage = {
-                        promptTokens: ev.usageSoFar.promptTokens,
-                        completionTokens: ev.usageSoFar.completionTokens,
-                        elapsedMs: Date.now() - assistant.createTime,
-                    }
-                }
-                break
-            }
-            case 'download_ready': {
-                assistant.downloads = assistant.downloads || []
-                assistant.downloads.push({url: ev.url, label: ev.label, size: ev.size, expiresAt: ev.expiresAt})
-                break
             }
         }
     }
