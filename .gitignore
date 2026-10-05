@@ -141,3 +141,5 @@ dmypy.json
 # 閮ㄧ讲鑴氭湰鐨勪緷璧栨寚绾癸紙deploy.bat 鐢紝浠呭瓨鍦ㄤ簬鏈嶅姟鍣級
 .req.md5
 .req.md5.new
+# 维护 Agent 本地冒烟脚本（硬编码本地库口令，仅存本地）
+backend/_smoke_agent.py

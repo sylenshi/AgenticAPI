@@ -1,6 +1,6 @@
 # AgenticAPI
 
-> 文档版本：v0.7.4 ｜ 更新日期：2026-09-16 ｜ 状态：持续迭代中
+> 文档版本：v0.9.0 ｜ 更新日期：2026-10-05 ｜ 状态：持续迭代中
 
 ## 背景
 
@@ -46,6 +46,15 @@ AgenticAPI 是一个基于 Agent 的 API 中转站平台，支持通过 Agent �
   普通用户输入兑换码即充值（访客禁止兑换），核销为单事务（SELECT FOR UPDATE 锁码防并发重复核销 → 状态机
   1未使用→2已使用 → `balance = balance + 面值` 原子加钱 → 同事务写日志），成功响应直接返回新余额、前端即时联动展示；
   页面双视图：所有登录用户可见兑换入口与「我的兑换记录」，管理区块仅管理员可见（生成/管理/监控）
+- **维护 Agent（站点运维对话式 Agent，前后端）**：控制台「维护Agent」页（`/dashboard/agent`，仅管理员），三栏布局（会话侧栏 / 对话窗口 / 设置面板）；
+  后端四阶段 agent 循环（排队→准备→执行→收尾）多轮调用站内任意已启用模型（可会话中切换，下一轮生效），每轮独立经中转链路计费（日志
+  标注"维护Agent调用"、不写对话记录）；**27 个白名单运维工具**按风险三级管控——L0 只读（巡检/统计/拨测/用量）直接执行、L1
+  低危写（渠道改配置/数据导出/技能增删）弹审批卡（可开会话级自动批准）、L2 高危（数据表清理，两阶段 dry-run 先行）强制审批 +
+  每会话 ≤5 次 + 可整会话关闭（只读模式）；所有工具入参/出参递归**脱敏**（密钥只留 `前3****后4` 掩码）、结果截断 8KB、双轨审计（logs
+  type=admin 流水 + `agent_message` 全轨迹含审批状态）；护栏：24 轮 / 200k token 上限、超长自动脱水压缩、截断防御（finish_reason=length
+  拒绝工具调用）、审批 300s 超时、同会话并发 409；SSE 站内扩展事件 `agenticapi_agent`（工具进度 / 审批卡 / 模型切换 / 导出就绪）实时驱动前端；
+  数据导出走一次性 token（24h 过期、仅一次）下载 zip；内置 6 个运维技能（巡检 / 数据治理 / 渠道排障 / 水位研判 / 新模型上线 / 故障复盘）+
+  会话内可教学自定义技能（slug/大小/脱敏校验）；会话服务端持久化（近 30 天 + 每用户保留 50 个，惰性清理）
 - **状态码语义**：401 = 未认证（前端清空登录态并弹登录框）；403 = 已登录但无权限（仅提示不登出）
 - **接口规范**：站内管理接口统一响应格式 `{code, message, data}` + 全局异常处理器，规范文档见 [
   `backend/docs/API接口规范.md`](docs/API接口规范.md)；对外中转接口按 OpenAI 报文规范返回（成功透传上游、失败返回
@@ -181,11 +190,12 @@ AgenticAPI/
 ├── backend/
 │   ├── app/
 │   │   ├── core/         # 配置、数据库引擎与会话
-│   │   ├── router/       # API 路由层（channels / models / operations / user / keys / redeem / admin / monitor / relay / studio / site）
+│   │   ├── router/       # API 路由层（channels / models / operations / user / keys / redeem / admin / monitor / relay / studio / site / maintain_agent）
 │   │   ├── schemas/      # Pydantic 请求/响应模型（驼峰别名映射）
-│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、studio_agent_service 工坊搜索循环、search_service 联网搜索、agent_service 站内 Agent 能力）
+│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、studio_agent_service 工坊搜索循环、search_service 联网搜索、agent_service 站内 Agent 能力、agent/ 维护Agent 循环与 27 工具、probe_service 渠道拨测、export_service 数据导出）
 │   │   ├── crud/         # 数据访问层（原生 SQL）
-│   │   ├── models/       # SQLAlchemy 表定义（user / user_token / api_key / redeem_code / logs / chat_record / usage_* / system_config / llm_*）
+│   │   ├── models/       # SQLAlchemy 表定义（user / user_token / api_key / redeem_code / logs / chat_record / usage_* / system_config / llm_* / agent_session / agent_message）
+│   │   ├── agent_skills/ # 维护 Agent 内置技能（Markdown SOP，frontmatter 元数据）
 │   │   └── utils/        # 统一响应、全局异常处理器、认证与安全工具等
 │   ├── docs/             # 项目文档（API 接口规范等）
 │   ├── .env              # 环境变量（MySQL 连接配置，不入库；可选 STEPFUN_API_KEY 开启工坊语音）
@@ -300,6 +310,7 @@ JSON / SSE 流或返回 OpenAI 结构（`/v1/models` 返回 `{"object": "list", 
 
 | 版本     | 日期         | 说明                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 |--------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| v0.9.0 | 2026-10-05 | 站点维护 Agent 上线（控制台「维护Agent」页，仅管理员）：新增 `agent_session` / `agent_message` 两表（会话与全轨迹服务端持久化，含工具调用参数与审批状态变迁，近 30 天 + 每用户 50 会话惰性清理，启动自动建表）；后端四阶段 agent 循环（`app/services/agent/`）多轮驱动站内任意已启用模型（可中途切换、下一轮生效），每轮独立经中转链路计费（`_finalize_call` 新增 `source="agent"` 分支：扣费/写日志/进统计照常，唯一差异不写 `chat_record`）；**27 个白名单运维工具**三级风险管控——L0 只读 19 个直接执行，L1 低危写 5 个弹审批卡（会话级可开自动批准），L2 高危清理 3 个强制审批 + 两阶段 dry-run 先行 + 每会话 ≤5 次 + 可整会话关闭（只读模式）；工具全链路递归脱敏（键名/值形态双识别，密钥留 `前3****后4` 掩码，**库里与前端均无密钥原文**）+ 结果 8KB 截断 + logs type=admin 双轨审计；护栏：24 轮 / 200k token 上限、旧工具结果脱水 + 超限压缩、finish_reason=length 截断防御、审批 300s 超时、同会话并发 409、重启悬空 tool 消息修复；SSE 站内扩展事件 `agenticapi_agent`（tool_start/progress/end、confirm_required/resolved、model_switched、round_end、download_ready）；数据导出 zip + 一次性 token（24h 过期仅一次）；内置 6 个运维技能（`app/agent_skills/`）+ 会话内教学自定义技能（`DATA_DIR/agent_skills`，slug/32KB/脱敏校验，save/delete 均强制审批）；支撑服务新增 `probe_service`（渠道/模型直发拨测免计费）与 `export_service`（JSONL gzip zip 导出）；前端新增三栏对话页（会话侧栏/对话窗口/设置面板，模型选择按分组过滤）与 ToolStatusBar/ApprovalCard/DownloadCard 组件，fetch SSE 复用工坊解析骨架；本机 18 项冒烟全通过（含计费、审批、导出、模型切换、密钥零泄漏）；同步数据库设计文档（新增 5.12/5.13 节）。已知取舍：执行中不支持插话（同会话并发返回 409）；豆包 encrypted_content 加密片段仅内存跨轮、不持久化（重启丢失后自动剪除） |
 | v0.8.1 | 2026-10-03 | 注册分组策略调整：正式注册用户统一进入 **vip** 分组（可调用全部分组模型），访客账号显式固定 **free** 分组（仅免费模型）；`create_user` 显式传 `user_group="vip"`、`create_guest_user` 显式传 `"free"`，`user_group` 列默认值保持 `free` 作最小权限兜底；存量用户不受影响，README/数据库设计文档同步 |
 | v0.8.0 | 2026-10-03 | 兑换码充值链路上线：`redeem_code` 表（码值/面值/三态状态/批次/核销快照，唯一索引 + 批次/使用人索引，启动自动建表）+ 后端用户端（`POST /redeem` 核销、`GET /redeem/records` 记录）与管理端（`/admin/redeem-codes` 生成/分页/统计/停用）接口；核销单事务保证原子性（FOR UPDATE 锁码防并发重复核销 → 状态机 1→2 → 列表达式原子加余额 → 同事务写日志 `auto_commit=False`），访客 403 禁止兑换；前端控制台-兑换页开放给所有登录用户（侧边栏移出 adminPaths），双视图：兑换入口 + 我的兑换记录（全员）、四卡监控统计 + 生成/筛选/停用管理表格（仅管理员），生成结果码列表一键复制；概览页「余额充值」改为跳转兑换页（唯一兑换入口），兑换成功响应直接返回新余额前端即时联动；`docs/数据库设计文档.md` 同步 5.4 节。注意：`frontend/src/views` 下组件 `:style` 数字宽度（如 `{width: 200}`）在本机依赖组合下不生效（Vue 对象样式数字值不自动加 px，CSSOM 静默丢弃），本页已全部改为字符串 `'200px'`，其余页面存量写法待后续统一 |
 | v0.7.4 | 2026-09-16 | 前端响应式修复 + 全站 UI 精修（纯视觉层，无逻辑/接口改动）。响应式：模型广场网格 `max-width: 1076px` 封顶居中（4×260 卡 + 3×12 间距，大屏恒每行 4 张，窄屏 auto-fill 自然降级）；控制台布局抽出 `.dashboard-container`（1280px 居中）统一覆盖概览/密钥/用户/渠道/运维五页。精修：全局细滚动条与 `::selection` 主色选中；焦点环/禁用文字色收敛为设计令牌（`--color-focus-ring` 等）；Arco 输入类聚焦柔光环、表格圆角裁剪、弹层遮罩轻毛玻璃；控制台统一 page-card 白卡骨架，密钥/渠道状态列改语义色圆点+文字，密钥 code 与行内编辑降噪，运维四卡按渠道加色脊线；模型卡 hover 升级（描边+投影+上浮）；顶栏毛玻璃；监控页筛选栏说明文字令牌化。监控 1440/文档 1024/首页 1080/工坊全宽保持不变 |
