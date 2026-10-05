@@ -175,7 +175,9 @@ async def chat_completions(
     :param user: API 密钥对应的用户（路由层已完成密钥鉴权）
     :param api_key_id: 使用的密钥ID（用于更新最后使用时间；工坊等站内调用无密钥，传 None）
     :param source: 调用来源。"relay" = 对外中转（计费）；"studio" = 模型工坊（免费，
-        跳过余额校验与扣款，日志 cost 记 0，不写对话记录，token 照常进用量统计）
+        跳过余额校验与扣款，日志 cost 记 0，不写对话记录，token 照常进用量统计）；
+        "agent" = 站点维护 Agent（计费照常扣管理员个人余额，唯一差异是不写 chat_record
+        ——维护对话含工具轨迹，独立存储在 agent_message 表，混入业务监控页会互相污染）
     """
     start_ms = time.time()
 
@@ -288,8 +290,11 @@ async def _finalize_call(
     对话内容仅在模型开启 is_log 且 输入+输出 token ≤ 管理员阈值
     （system_config 的 chat_record_max_tokens，默认 5000）时记录，避免落库超长文本。
     工坊调用（source="studio"）免费：不扣款、日志 cost 记 0、必写对话记录，统计照常。
+    维护 Agent（source="agent"）计费照常（扣管理员余额、cost 如实），唯一差异是
+    不写 chat_record——维护对话独立存储在 agent_message 表（避免污染业务对话监控页）。
     """
     is_studio = source == "studio"
+    is_agent = source == "agent"
 
     cost, prompt_tokens, completion_tokens, cache_tokens = compute_cost(model, usage)
     duration_ms = int((time.time() - start_ms) * 1000)
@@ -303,6 +308,8 @@ async def _finalize_call(
         db, type="api", action="chat", user_id=user.id, username=user.username,
         detail=(f"工坊调用模型 {model_name}（流式，免费）" if is_stream and is_studio
                 else f"工坊调用模型 {model_name}（免费）" if is_studio
+        else f"维护Agent调用模型 {model_name}（流式）" if is_stream and is_agent
+        else f"维护Agent调用模型 {model_name}" if is_agent
         else f"中转调用模型 {model_name}（流式）" if is_stream
         else f"中转调用模型 {model_name}"),
         model_name=model_name, channel_name=channel_name,
@@ -326,8 +333,9 @@ async def _finalize_call(
         await db.rollback()
         print(f"[relay] 用量统计写入失败: {exc.__class__.__name__}: {exc}")
 
-    # ── 对话记录：如果是在工坊中调用模型，或者该模型的is_log为True，那么才写对话记录 ──
-    if is_studio or model.get("is_log"):
+    # ── 对话记录：工坊调用必写；普通中转在模型开启 is_log 时写；维护 Agent 不写
+    #    （维护对话独立存储在 agent_message 表，见 _finalize_call 文档注释）──
+    if not is_agent and (is_studio or model.get("is_log")):
         try:
             threshold = await config_crud.get_chat_record_threshold(db)
             if prompt_tokens + completion_tokens > threshold:

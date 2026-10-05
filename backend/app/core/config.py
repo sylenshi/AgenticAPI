@@ -70,6 +70,8 @@ class AgentSettings(BaseSettings):
     STEPFUN_API_KEY: str = ""
     # Agent 标题模型（默认使用 StepFun 模型）
     AGENT_TITLE_MODEL: str = ""
+    # 站点维护 Agent 默认大脑模型（站内出站模型名；system_config 的 agent_default_model 优先于此值）
+    AGENT_MAINTENANCE_MODEL: str = ""
 
 
 class ZaiOpsSettings(BaseSettings):

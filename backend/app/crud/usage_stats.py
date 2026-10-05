@@ -91,12 +91,12 @@ async def get_summary(db: AsyncSession) -> dict:
 
 
 async def query_user_series(
-        db: AsyncSession,
-        *,
-        user_id: int,
-        start: datetime,
-        end: datetime,
-        granularity: str = "day",
+    db: AsyncSession,
+    *,
+    user_id: int,
+    start: datetime,
+    end: datetime,
+    granularity: str = "day",
 ) -> list[dict]:
     """
     按时间粒度聚合当前用户的用量序列，返回每 桶×模型 一行：
@@ -119,6 +119,32 @@ async def query_user_series(
             ORDER BY bucket, model_name
         """),
         {"user_id": user_id, "start": start, "end": end},
+    )
+    return [dict(r) for r in result.mappings().all()]
+
+
+async def query_global_series(
+    db: AsyncSession,
+    *,
+    start: datetime,
+    end: datetime,
+    granularity: str = "day",
+) -> list[dict]:
+    """全站口径的用量序列（不限用户），结构同 query_user_series；维护 Agent 趋势查询用"""
+    bucket_expr = _BUCKET_EXPR.get(granularity, _BUCKET_EXPR["day"])
+    result = await db.execute(
+        text(f"""
+            SELECT {bucket_expr} AS bucket, model_name,
+                   SUM(calls) AS calls,
+                   SUM(prompt_tokens) AS prompt_tokens,
+                   SUM(completion_tokens) AS completion_tokens,
+                   SUM(cache_tokens) AS cache_tokens
+            FROM usage_stats
+            WHERE stat_hour >= :start AND stat_hour < :end
+            GROUP BY bucket, model_name
+            ORDER BY bucket, model_name
+        """),
+        {"start": start, "end": end},
     )
     return [dict(r) for r in result.mappings().all()]
 

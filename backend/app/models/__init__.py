@@ -16,10 +16,13 @@ from app.models.chat_record import ChatRecordTable
 from app.models.usage_stats import UsageStatsTable
 from app.models.usage_summary import UsageSummaryTable
 from app.models.system_config import SystemConfigTable
+from app.models.agent_session import AgentSessionTable
+from app.models.agent_message import AgentMessageTable
 
 
 __all__ = [
     "BaseModel", "ModelsTable", "ChannelsTable",
     "UserTabel", "UserTokenTabel", "ApiKeyTable", "RedeemCodeTable", "LogsTable",
     "ChatRecordTable", "UsageStatsTable", "UsageSummaryTable", "SystemConfigTable",
+    "AgentSessionTable", "AgentMessageTable",
 ]
