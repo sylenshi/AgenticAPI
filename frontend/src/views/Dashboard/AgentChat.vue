@@ -1,28 +1,7 @@
-<!-- 站点维护 Agent 对话页（仅管理员）：会话侧栏 + 对话窗口（复用工坊消息组件）+ 右侧设置面板 -->
+<!-- 站点维护 Agent 对话页（仅管理员）：对话窗口（复用工坊消息组件）+ 右侧合并面板（会话/设置/帮助） -->
 <template>
   <div class="agent-page">
-    <!-- 左栏：会话列表 -->
-    <aside class="agent-sessions">
-      <a-button type="primary" size="small" long @click="agentStore.createSession()">
-        <template #icon><icon-plus/></template>
-        新建会话
-      </a-button>
-      <div class="session-list">
-        <div v-for="s in agentStore.sessions" :key="s.sessionId"
-             class="session-item" :class="{active: s.sessionId === agentStore.currentSessionId}"
-             @click="agentStore.selectSession(s.sessionId)">
-          <div class="session-title">{{ s.title }}</div>
-          <div class="session-meta">{{ s.modelName }}</div>
-          <button class="session-delete" title="删除会话"
-                  @click.stop="confirmRemove(s.sessionId)">×</button>
-        </div>
-        <div v-if="!agentStore.sessions.length && !loading" class="session-empty">
-          暂无会话，点击上方新建
-        </div>
-      </div>
-    </aside>
-
-    <!-- 中栏：对话窗口 -->
+    <!-- 对话窗口（主区） -->
     <section class="agent-chat">
       <template v-if="agentStore.currentSession">
         <header class="chat-header">
@@ -58,8 +37,31 @@
       </div>
     </section>
 
-    <!-- 右栏：会话设置与说明 -->
+    <!-- 右栏：会话 / 设置 / 说明（原左栏会话栏合并至此，整页保持三列：导航 + 对话 + 本面板） -->
     <aside class="agent-panel">
+      <div class="panel-section">
+        <div class="panel-title">会话</div>
+        <a-button type="primary" size="small" long @click="agentStore.createSession()">
+          <template #icon><icon-plus/></template>
+          新建会话
+        </a-button>
+        <!-- 透明滚动容器：只露出最近 5 条会话，更早的在容器内滚动查找 -->
+        <div class="session-list-scroll">
+          <div class="session-list">
+            <div v-for="s in agentStore.sessions" :key="s.sessionId"
+                 class="session-item" :class="{active: s.sessionId === agentStore.currentSessionId}"
+                 @click="agentStore.selectSession(s.sessionId)">
+              <div class="session-title">{{ s.title }}</div>
+              <button class="session-delete" title="删除会话"
+                      @click.stop="confirmRemove(s.sessionId)">×</button>
+            </div>
+            <div v-if="!agentStore.sessions.length && !loading" class="session-empty">
+              暂无会话，点击上方新建
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel-section">
         <div class="panel-title">会话设置</div>
         <div class="panel-row">
@@ -92,13 +94,13 @@
       <div class="panel-section">
         <div class="panel-title">帮助</div>
         <div class="help-actions">
-          <a-button type="outline" size="small" long @click="usageVisible = true">
+          <a-button type="outline" size="small" @click="usageVisible = true">
             <template #icon><icon-bulb/></template>
-            使用提示
+            提示
           </a-button>
-          <a-button type="outline" size="small" status="warning" long @click="safetyVisible = true">
+          <a-button type="outline" size="small" status="warning" @click="safetyVisible = true">
             <template #icon><icon-safe/></template>
-            安全提示
+            安全
           </a-button>
         </div>
       </div>
@@ -206,19 +208,15 @@ async function confirmRemove(sessionId: number) {
   min-width: 0;
 }
 
-/* ── 左栏：会话侧栏 ── */
-.agent-sessions {
-  width: 220px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-height: 0;
+/* ── 会话列表（右栏内）：透明滚动容器只露最近 5 条，更早的在容器内滚动查找 ── */
+.session-list-scroll {
+  margin-top: var(--space-2);
+  /* 5 × 单行条目（6+6 padding + 21 行高 + 2 边框 = 35px）+ 4 × 4px 间距 = 191px */
+  max-height: 192px;
+  overflow-y: auto;
 }
 
 .session-list {
-  flex: 1;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -226,7 +224,7 @@ async function confirmRemove(sessionId: number) {
 
 .session-item {
   position: relative;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-white);
@@ -245,6 +243,7 @@ async function confirmRemove(sessionId: number) {
 
 .session-title {
   font-size: var(--text-sm);
+  line-height: 21px;
   color: var(--color-text);
   padding-right: 18px;
   overflow: hidden;
@@ -252,20 +251,10 @@ async function confirmRemove(sessionId: number) {
   white-space: nowrap;
 }
 
-.session-meta {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .session-delete {
   position: absolute;
-  top: 6px;
-  right: 8px;
+  top: 5px;
+  right: 6px;
   display: none;
   border: none;
   background: none;
@@ -450,8 +439,11 @@ async function confirmRemove(sessionId: number) {
 
 .help-actions {
   display: flex;
-  flex-direction: column;
   gap: var(--space-2);
+}
+
+.help-actions :deep(.arco-btn) {
+  flex: 1;
 }
 
 /* 帮助弹窗 markdown 渲染（v-html 内容不吃 scoped，需 :deep 穿透） */
@@ -519,12 +511,8 @@ async function confirmRemove(sessionId: number) {
   font-weight: var(--font-medium);
 }
 
-/* 窄屏：右侧面板收纳到底部（简单响应式） */
+/* 窄屏：右侧合并面板整体收起，对话区独占（简单响应式） */
 @media (max-width: 1100px) {
   .agent-panel { display: none; }
-}
-
-@media (max-width: 860px) {
-  .agent-sessions { display: none; }
 }
 </style>
