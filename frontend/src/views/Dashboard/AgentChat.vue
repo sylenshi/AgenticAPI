@@ -45,7 +45,7 @@
           <template #icon><icon-plus/></template>
           新建会话
         </a-button>
-        <!-- 透明滚动容器：只露出最近 5 条会话，更早的在容器内滚动查找 -->
+        <!-- 透明滚动容器：只露出最近 3 条会话，更早的在容器内滚动查找 -->
         <div class="session-list-scroll">
           <div class="session-list">
             <div v-for="s in agentStore.sessions" :key="s.sessionId"
@@ -211,8 +211,8 @@ async function confirmRemove(sessionId: number) {
 /* ── 会话列表（右栏卡片内）：固定条目高度 + 滚轮容器，恰好露出最近 5 条，更早的滚动查找 ── */
 .session-list-scroll {
   margin-top: var(--space-2);
-  /* 与 .session-item 固定高 36px 联动：5 条 + 4 个 4px 间距（滚动条为全局细灰样式） */
-  max-height: calc(36px * 5 + 4px * 4);
+  /* 与 .session-item 固定高 36px 联动：3 条 + 2 个 4px 间距（滚动条为全局细灰样式） */
+  max-height: calc(36px * 3 + 4px * 2);
   overflow-y: auto;
 }
 
