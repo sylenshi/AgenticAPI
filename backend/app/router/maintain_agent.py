@@ -132,6 +132,14 @@ async def delete_session(session_id: int, db: AsyncSession = Depends(get_db),
     return success_response(message="会话已删除", data={"removedMessages": removed_messages})
 
 
+@router.delete("/sessions")
+async def clear_sessions(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    """一键清空当前管理员的全部会话（联动删除消息，单事务，写审计日志）"""
+    ses_count, msg_count = await agent_crud.delete_all_sessions(db, admin.id, username=admin.username)
+    return success_response(message="会话已清空",
+                            data={"removedSessions": ses_count, "removedMessages": msg_count})
+
+
 @router.post("/chat")
 async def agent_chat(body: AgentChatSchema, db: AsyncSession = Depends(get_db),
                      admin=Depends(get_current_admin)):

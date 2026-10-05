@@ -39,10 +39,16 @@
     <aside class="agent-panel">
       <div class="panel-section">
         <div class="panel-title">会话</div>
-        <a-button type="primary" size="small" long @click="agentStore.createSession()">
-          <template #icon><icon-plus/></template>
-          新建会话
-        </a-button>
+        <div class="session-actions">
+          <a-button type="primary" size="small" @click="agentStore.createSession()">
+            <template #icon><icon-plus/></template>
+            新建会话
+          </a-button>
+          <a-button type="outline" size="small" status="danger" @click="confirmClear">
+            <template #icon><icon-delete/></template>
+            清空
+          </a-button>
+        </div>
         <!-- 透明滚动容器：只露出最近 3 条会话，更早的在容器内滚动查找 -->
         <div class="session-list-scroll">
           <div class="session-list">
@@ -194,6 +200,21 @@ async function confirmRemove(sessionId: number) {
   const ok = await confirmDialog('删除该会话将联动删除全部消息记录，不可恢复。', '删除会话', '删除', true)
   if (ok) agentStore.removeSession(sessionId)
 }
+
+/** 一键清空：生成中禁用（流式回写目标会话会被删掉），空列表无可清项 */
+async function confirmClear() {
+  if (agentStore.isStreaming) {
+    Message.warning('请先停止当前生成，再清空会话')
+    return
+  }
+  if (!agentStore.sessions.length) {
+    Message.info('当前没有可清空的会话')
+    return
+  }
+  const ok = await confirmDialog(
+      `将删除全部 ${agentStore.sessions.length} 个会话及所有消息记录，不可恢复。`, '清空会话', '清空', true)
+  if (ok) await agentStore.clearSessions()
+}
 </script>
 
 <style scoped>
@@ -206,7 +227,18 @@ async function confirmRemove(sessionId: number) {
   min-width: 0;
 }
 
-/* ── 会话列表（右栏卡片内）：固定条目高度 + 滚轮容器，恰好露出最近 5 条，更早的滚动查找 ── */
+/* ── 会话列表（右栏卡片内）：固定条目高度 + 滚轮容器，恰好露出最近 3 条，更早的滚动查找 ── */
+.session-actions {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-2);
+}
+
+.session-actions > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .session-list-scroll {
   margin-top: var(--space-2);
   /* 与 .session-item 固定高 36px 联动：3 条 + 2 个 4px 间距（滚动条为全局细灰样式） */

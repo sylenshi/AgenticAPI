@@ -141,6 +141,29 @@ async def delete_session(db: AsyncSession, session_id: int) -> int:
     return msg_count
 
 
+async def delete_all_sessions(db: AsyncSession, user_id: int, *, username: str) -> tuple[int, int]:
+    """一键清空：删除用户全部会话及消息（单事务）并写 admin 日志，返回 (会话数, 消息数)"""
+    msg_result = await db.execute(
+        text("""
+            DELETE am FROM agent_message am
+            JOIN agent_session s ON am.session_id = s.id
+            WHERE s.user_id = :uid
+        """),
+        {"uid": user_id},
+    )
+    msg_count = msg_result.rowcount or 0
+    ses_result = await db.execute(
+        text("DELETE FROM agent_session WHERE user_id = :uid"), {"uid": user_id})
+    ses_count = ses_result.rowcount or 0
+    await db.commit()
+    if ses_count or msg_count:
+        await log_crud.write_log(
+            db, type="admin", action="agent_session_clear", user_id=user_id, username=username,
+            detail=f"一键清空维护Agent会话 {ses_count} 个（联动删除消息 {msg_count} 条）",
+        )
+    return ses_count, msg_count
+
+
 async def gc_sessions(db: AsyncSession, user_id: int, *, username: str) -> int:
     """
     惰性清理当前用户的过期/超限会话，返回删除的会话数。

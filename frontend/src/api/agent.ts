@@ -164,6 +164,11 @@ export function deleteAgentSession(sessionId: number) {
     return request.delete<{ removedMessages: number }>(`/maintain-agent/sessions/${sessionId}`)
 }
 
+/** 一键清空当前用户全部会话（联动删除消息，单事务） */
+export function clearAgentSessions() {
+    return request.delete<{ removedSessions: number; removedMessages: number }>('/maintain-agent/sessions')
+}
+
 /** 审批决议（confirm_required 卡片的批准/拒绝按钮） */
 export function resolveApproval(approvalId: string, approved: boolean) {
     return request.post<{ approvalId: string; result: string }>('/maintain-agent/approve', {

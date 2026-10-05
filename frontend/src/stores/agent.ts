@@ -3,6 +3,7 @@ import {defineStore} from 'pinia'
 import {computed, ref} from 'vue'
 import {Message} from '@arco-design/web-vue'
 import {
+    clearAgentSessions,
     createAgentSession,
     deleteAgentSession,
     listAgentMessages,
@@ -133,6 +134,20 @@ export const useAgentStore = defineStore('agent', () => {
             Message.success('会话已删除')
         } catch (err) {
             Message.error(getErrorMessage(err, '删除会话失败'))
+        }
+    }
+
+    /** 一键清空全部会话（服务端单事务删除，成功后本地整体复位） */
+    async function clearSessions() {
+        try {
+            const res = await clearAgentSessions()
+            stop()
+            sessions.value = []
+            currentSessionId.value = null
+            messages.value = []
+            Message.success(`已清空 ${res.data.removedSessions} 个会话（${res.data.removedMessages} 条消息）`)
+        } catch (err) {
+            Message.error(getErrorMessage(err, '会话清空失败'))
         }
     }
 
@@ -330,7 +345,7 @@ export const useAgentStore = defineStore('agent', () => {
     return {
         sessions, currentSessionId, messages, isStreaming,
         currentSession, currentModel,
-        loadSessions, createSession, selectSession, removeSession, patchSession,
+        loadSessions, createSession, selectSession, removeSession, clearSessions, patchSession,
         send, stop, approve,
     }
 })
