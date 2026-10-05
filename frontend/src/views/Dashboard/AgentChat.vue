@@ -31,11 +31,12 @@
             <span class="chat-model-tag">{{ agentStore.currentModel }}</span>
           </div>
           <a-select :model-value="agentStore.currentModel" size="small"
-                    :style="{width: '220px'}" placeholder="切换驱动模型（下一轮生效）"
+                    :style="{width: '280px'}" placeholder="切换驱动模型（下一轮生效）"
                     :disabled="agentStore.isStreaming"
                     @change="(v: any) => agentStore.patchSession({modelName: String(v)})">
             <a-option v-for="m in availableModels" :key="m.name" :value="m.name">
-              {{ m.label || m.name }}
+              <span class="model-name-text">{{ m.name }}</span>
+              <span class="model-group-tag">{{ m.label }}</span>
               <span class="model-group-tag">{{ m.modelGroup }}</span>
             </a-option>
           </a-select>
@@ -82,22 +83,45 @@
       <div class="panel-section">
         <div class="panel-title">风险等级</div>
         <div class="risk-legend">
-          <div class="risk-item"><span class="risk-dot l0"></span>L0 只读——直接执行</div>
-          <div class="risk-item"><span class="risk-dot l1"></span>L1 低危写——审批卡片（可自动批准）</div>
-          <div class="risk-item"><span class="risk-dot l2"></span>L2 高危写——强审批 + 两段式 dry-run</div>
+          <div class="risk-item"><span class="risk-dot l0"></span>L0 只读：直接执行</div>
+          <div class="risk-item"><span class="risk-dot l1"></span>L1 低危写：审批卡片（可自动批准）</div>
+          <div class="risk-item"><span class="risk-dot l2"></span>L2 高危写：强审批 + 两段式 dry-run</div>
         </div>
       </div>
 
       <div class="panel-section">
-        <div class="panel-title">使用提示</div>
-        <ul class="panel-tips">
-          <li>大脑模型走你的个人账户计费，随时可切换站内任意模型</li>
-          <li>清理数据表务必先看 dry-run 预览再批准真删</li>
-          <li>巡检 / 排障 / 治理有内置 SOP，直接说"出一份巡检报告"</li>
-          <li>渠道密钥永不展示；所有操作写入审计日志</li>
-        </ul>
+        <div class="panel-title">帮助</div>
+        <div class="help-actions">
+          <a-button type="outline" size="small" long @click="usageVisible = true">
+            <template #icon><icon-bulb/></template>
+            使用提示
+          </a-button>
+          <a-button type="outline" size="small" status="warning" long @click="safetyVisible = true">
+            <template #icon><icon-safe/></template>
+            安全提示
+          </a-button>
+        </div>
       </div>
     </aside>
+
+    <!-- 使用提示 / 安全提示弹窗 -->
+    <a-modal v-model:visible="usageVisible" title="使用提示" :width="520" :footer="false">
+      <ul class="modal-tips">
+        <li>大脑模型走你的个人账户计费，右侧可随时切换站内任意模型（下一轮生效）</li>
+        <li>复合运维任务直接一句话下达，如「出一份巡检报告」「测一遍所有渠道」</li>
+        <li>内置巡检 / 排障 / 数据治理等 SOP，也可在会话中教它新技能（保存与删除均需审批）</li>
+        <li>导出结果以一次性下载链接返回（24 小时有效，仅可下载一次）</li>
+        <li>清理数据表务必先查看 dry-run 预览，确认影响行数后再批准真删</li>
+      </ul>
+    </a-modal>
+    <a-modal v-model:visible="safetyVisible" title="安全提示" :width="520" :footer="false">
+      <ul class="modal-tips">
+        <li>27 个工具按风险三级管控：L0 只读直接执行；L1 低危写弹审批卡片，可开会话级自动批准；L2 高危写强制人工审批且每会话最多 5 次</li>
+        <li>关闭右侧「L2 高危工具」即进入只读模式，高危工具不会注入给模型</li>
+        <li>渠道密钥全程递归脱敏，展示与落库均只有掩码，数据库与前端不存密钥原文</li>
+        <li>每一次工具调用与审批决定（含拒绝、超时）都写入审计日志，可在监控页追溯</li>
+      </ul>
+    </a-modal>
   </div>
 </template>
 
@@ -113,6 +137,9 @@ import {confirmDialog} from '@/utils/feedback'
 const agentStore = useAgentStore()
 const modelListStore = useModelListStore()
 const loading = ref(false)
+/** 使用提示 / 安全提示弹窗开关 */
+const usageVisible = ref(false)
+const safetyVisible = ref(false)
 
 /** 模型选择器数据：站内启用中的出站模型（管理员 vip 全量可用） */
 const availableModels = computed(() =>
@@ -285,6 +312,11 @@ async function confirmRemove(sessionId: number) {
   flex-shrink: 0;
 }
 
+.model-name-text {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
 .model-group-tag {
   font-size: 11px;
   color: var(--color-text-muted);
@@ -386,14 +418,20 @@ async function confirmRemove(sessionId: number) {
 
 .risk-dot.l0 { background: var(--color-success); }
 .risk-dot.l1 { background: var(--color-warning); }
-.risk-dot.l2 { background: var(--color-danger); }
+.risk-dot.l2 { background: var(--color-error); }
 
-.panel-tips {
+.help-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.modal-tips {
   margin: 0;
   padding-left: 1.2em;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
-  line-height: 1.9;
+  line-height: 2;
 }
 
 /* 窄屏：右侧面板收纳到底部（简单响应式） */

@@ -23,8 +23,9 @@
 
     <!-- 主内容区域 -->
     <main class="dashboard-main">
-      <!-- 内容列：宽度封顶居中（大屏下控制台内容不再无限拉伸，两侧留灰底呼吸） -->
-      <div class="dashboard-container">
+      <!-- 内容列：宽度封顶居中（大屏下控制台内容不再无限拉伸，两侧留灰底呼吸）；
+           维护Agent 等全幅应用页（三栏对话布局）例外，占满整行 -->
+      <div class="dashboard-container" :class="{'dashboard-container--full': isFullBleed}">
         <slot/>
       </div>
     </main>
@@ -39,6 +40,9 @@ import {useUserStore} from '@/stores/user'
 
 const route = useRoute()
 const userStore = useUserStore()
+
+// 全幅页面（不套 1280px 封顶）：维护Agent 三栏布局需要占满整行
+const isFullBleed = computed(() => route.path.startsWith('/dashboard/agent'))
 
 const isActive = (path: string) => {
   return route.path === path
@@ -134,6 +138,11 @@ const visibleDashItems = computed(() => {
   max-width: 1280px;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* 全幅例外：维护Agent 等应用式页面占满整行 */
+.dashboard-container--full {
+  max-width: none;
 }
 
 @media (max-width: 768px) {
