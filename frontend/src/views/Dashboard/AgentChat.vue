@@ -197,6 +197,11 @@ async function onApprove(payload: { approvalId: string; approved: boolean }) {
 }
 
 async function confirmRemove(sessionId: number) {
+  // 生成中的会话禁止删除：SSE 流会继续往已删除的会话 id 写消息（表无外键拦不住），留下孤儿数据
+  if (agentStore.isStreaming && sessionId === agentStore.currentSessionId) {
+    Message.warning('当前会话正在生成，请先停止再删除')
+    return
+  }
   const ok = await confirmDialog('删除该会话将联动删除全部消息记录，不可恢复。', '删除会话', '删除', true)
   if (ok) agentStore.removeSession(sessionId)
 }
