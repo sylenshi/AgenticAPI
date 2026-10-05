@@ -8,7 +8,9 @@ import asyncio
 
 from app.services.agent.registry import ToolContext, ToolDef, register
 from app.services.operations_service import _load_ops_config, get_operations
-from app.utils.token_utils import get_token_expiry
+# 注意别名：下面的工具 handler 与原函数同名，直接 import 会被 handler 定义遮蔽，
+# _run() 里按模块全局名解析时就会递归调到 handler 自己（少传 args 必然 TypeError）
+from app.utils.token_utils import get_token_expiry as query_token_expiry
 
 VALID_SCOPES = ("vol", "stepfun", "zai", "zai2", "cc", "antigravity", "all")
 
@@ -45,7 +47,7 @@ async def get_token_expiry(ctx: ToolContext, args: dict) -> dict:
     """B2 上游凭证到期查询（JWT 解码），临期（≤7 天）标注提醒"""
     def _run() -> dict:
         operation_dict = _load_ops_config()
-        return get_token_expiry(operation_dict)
+        return query_token_expiry(operation_dict)
 
     expiry = await asyncio.to_thread(_run)
     if not isinstance(expiry, dict):
@@ -56,9 +58,9 @@ async def get_token_expiry(ctx: ToolContext, args: dict) -> dict:
     soon = []
     for name, value in expiry.items():
         item = {"credential": name, "expiry": value}
-        # 形如 "2026-10-12 03:00:00" 的字符串尝试解析临期判断
+        # 到期值可能是 "2026-10-12 03:00:00" 或 ISO 的 "2026-10-12T03:00:00"，统一按空格分隔解析
         try:
-            expire_at = _dt.datetime.strptime(str(value)[:19], "%Y-%m-%d %H:%M:%S")
+            expire_at = _dt.datetime.strptime(str(value)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
             days_left = (expire_at - _dt.datetime.now()).days
             item["daysLeft"] = days_left
             if 0 <= days_left <= 7:
