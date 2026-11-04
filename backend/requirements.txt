@@ -2,6 +2,7 @@ fastapi==0.111.0
 uvicorn==0.29.0
 sqlalchemy==2.0.51
 pymysql==1.1.0
+cryptography==50.0.2
 asyncmy==0.2.14
 pydantic-settings==2.2.1
 httpx==0.28.1
