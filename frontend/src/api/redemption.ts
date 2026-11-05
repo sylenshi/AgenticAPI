@@ -69,3 +69,13 @@ export function getRedeemStats() {
 export function disableRedeemCode(codeId: number) {
     return request.put(`/admin/redeem-codes/${codeId}/disable`)
 }
+
+/** 批量停用（仅未使用状态的码生效，返回实际停用张数；管理员） */
+export function disableRedeemCodes(ids: number[]) {
+    return request.put<{ disabled: number }>('/admin/redeem-codes/batch-disable', {ids})
+}
+
+/** 批量销毁（物理删除，未使用/已停用可销毁、已核销会被后端拒绝；返回销毁张数，管理员） */
+export function destroyRedeemCodes(ids: number[]) {
+    return request.delete<{ destroyed: number }>('/admin/redeem-codes', {data: {ids}})
+}

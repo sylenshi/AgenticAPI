@@ -58,6 +58,14 @@
         </a-button>
       </div>
 
+      <!-- 批量操作条：勾选后浮现（已核销的码在行选择中禁选，见 row-selection.selectable） -->
+      <div v-if="selectedKeys.length" class="batch-bar">
+        <span class="batch-count">已选 {{ selectedKeys.length }} 张</span>
+        <a-button size="small" @click="handleBatchDisable">批量停用</a-button>
+        <a-button size="small" status="danger" @click="handleBatchDestroy">批量销毁</a-button>
+        <a-link class="batch-clear" @click="selectedKeys = []">取消选择</a-link>
+      </div>
+
       <a-table
           row-key="id"
           :data="codes"
@@ -67,6 +75,9 @@
           :pagination="false"
           size="small"
           column-resizable
+          :row-selection="{type: 'checkbox', showCheckedAll: true}"
+          :selected-keys="selectedKeys"
+          @selection-change="onSelectionChange"
           class="redeem-table"
       >
         <template #code="{ record }">
@@ -84,8 +95,12 @@
         <template #usedTime="{ record }">{{ formatTime(record.usedTime) }}</template>
         <template #createTime="{ record }">{{ formatTime(record.createTime) }}</template>
         <template #operations="{ record }">
-          <a-button v-if="record.status === 1" type="text" size="small" status="danger"
-                    @click="handleDisable(record)">停用
+          <template v-if="record.status === 1">
+            <a-button type="text" size="small" status="danger" @click="handleDisable(record)">停用</a-button>
+            <a-button type="text" size="small" status="danger" @click="handleDestroy(record)">销毁</a-button>
+          </template>
+          <a-button v-else-if="record.status === 0" type="text" size="small" status="danger"
+                    @click="handleDestroy(record)">销毁
           </a-button>
           <span v-else class="op-placeholder">-</span>
         </template>
@@ -97,7 +112,7 @@
           :total="total"
           :page-size="pageSize"
           :page-size-options="[10, 20, 50]"
-          show-total show-jumper
+          show-total show-jumper show-page-size
           class="table-pagination"
           @change="loadCodes"
           @page-size-change="onPageSizeChange"
@@ -145,9 +160,11 @@
           v-model:current="recordsPage"
           :total="recordsTotal"
           :page-size="recordsPageSize"
-          show-total
+          :page-size-options="[10, 20, 50]"
+          show-total show-page-size
           class="table-pagination"
           @change="loadRecords"
+          @page-size-change="onRecordsPageSizeChange"
       />
     </div>
 
@@ -204,7 +221,9 @@ import {onMounted, reactive, ref} from 'vue'
 import {Message} from '@arco-design/web-vue'
 import type {TableColumnData} from '@arco-design/web-vue'
 import {
+  destroyRedeemCodes,
   disableRedeemCode,
+  disableRedeemCodes,
   generateRedeemCodes,
   getRedeemCodes,
   getRedeemRecords,
@@ -250,7 +269,7 @@ async function handleRedeem() {
 const records = ref<redeemRecordItem[]>([])
 const recordsTotal = ref(0)
 const recordsPage = ref(1)
-const recordsPageSize = 10
+const recordsPageSize = ref(10)
 const recordsLoading = ref(false)
 
 const recordColumns: TableColumnData[] = [
@@ -262,7 +281,7 @@ const recordColumns: TableColumnData[] = [
 async function loadRecords() {
   recordsLoading.value = true
   try {
-    const res = await getRedeemRecords({page: recordsPage.value, pageSize: recordsPageSize})
+    const res = await getRedeemRecords({page: recordsPage.value, pageSize: recordsPageSize.value})
     records.value = res.data.list
     recordsTotal.value = res.data.total
   } catch (err) {
@@ -284,16 +303,16 @@ const keyword = ref('')
 const batchNo = ref('')
 
 const columns: TableColumnData[] = [
-  // 不设 ID 列（码值即业务标识）：9 列合计 1150px，1280px 内容列内完整放下，不再横向滚动
+  // 不设 ID 列（码值即业务标识）：9 列合计 1160px，1280px 内容列内完整放下，不再横向滚动
   {title: '兑换码', slotName: 'code', width: 230},
   {title: '面值（元）', slotName: 'amount', width: 90, align: 'right'},
   {title: '状态', slotName: 'status', width: 110, align: 'center'},
   {title: '批次', dataIndex: 'batchNo', width: 110, ellipsis: true},
   {title: '备注', slotName: 'remark', width: 110, ellipsis: true},
   {title: '使用人', slotName: 'usedUsername', width: 100, ellipsis: true},
-  {title: '核销时间', slotName: 'usedTime', width: 160},
-  {title: '生成时间', slotName: 'createTime', width: 160},
-  {title: '操作', slotName: 'operations', width: 80, align: 'center', fixed: 'right'},
+  {title: '核销时间', slotName: 'usedTime', width: 145},
+  {title: '生成时间', slotName: 'createTime', width: 145},
+  {title: '操作', slotName: 'operations', width: 120, align: 'center', fixed: 'right'},
 ]
 
 // 三态状态映射：未使用绿 / 已使用灰 / 已停用红（is-on/is-off 为全局语义类，is-used 为本页扩展）
@@ -341,6 +360,12 @@ function onPageSizeChange(size: number) {
   loadCodes()
 }
 
+function onRecordsPageSizeChange(size: number) {
+  recordsPageSize.value = size
+  recordsPage.value = 1
+  loadRecords()
+}
+
 async function handleDisable(item: redeemCodeItem) {
   const confirmed = await confirmDialog(
       `确定停用兑换码「${item.code}」吗？停用后不可再被兑换。`,
@@ -353,6 +378,75 @@ async function handleDisable(item: redeemCodeItem) {
     await Promise.all([loadCodes(), loadStats()])
   } catch (err) {
     Message.error(getErrorMessage(err, '停用失败'))
+  }
+}
+
+// ═══════════════ 勾选批量操作 + 单张销毁 ═══════════════
+// 行勾选状态（已核销的码不可勾选：销毁会连带抹掉用户兑换记录，后端亦有兜底校验）
+const selectedKeys = ref<(string | number)[]>([])
+
+function onSelectionChange(keys: (string | number)[]) {
+  // 剔除当前页的已核销码（表头全选也会经过这里）；不在当前页的已勾选项保留（跨页批量）
+  selectedKeys.value = keys.filter(k => {
+    const row = codes.value.find(c => c.id === Number(k))
+    return !row || row.status !== 2
+  })
+}
+
+async function handleDestroy(item: redeemCodeItem) {
+  const confirmed = await confirmDialog(
+      `确定销毁兑换码「${item.code}」吗？销毁后该码从数据库移除、不可恢复，累计发行统计随之减少。`,
+      '销毁兑换码', '销毁', true,
+  )
+  if (!confirmed) return
+  try {
+    await destroyRedeemCodes([item.id])
+    Message.success('兑换码已销毁')
+    await Promise.all([loadCodes(), loadStats()])
+  } catch (err) {
+    Message.error(getErrorMessage(err, '销毁失败'))
+  }
+}
+
+async function handleBatchDisable() {
+  const ids = selectedKeys.value.map(Number)
+  if (!ids.length) return
+  // 前端预检：勾选里没有未使用状态的码时直接提示（后端仍会兜底校验）
+  const unusedCount = codes.value.filter(c => ids.includes(c.id) && c.status === 1).length
+  if (!unusedCount) {
+    Message.warning('所选兑换码中没有未使用状态的码，无需停用')
+    return
+  }
+  const confirmed = await confirmDialog(
+      `确定批量停用所选 ${ids.length} 张兑换码吗？仅其中 ${unusedCount} 张未使用的会被停用。`,
+      '批量停用', '停用', true,
+  )
+  if (!confirmed) return
+  try {
+    const res = await disableRedeemCodes(ids)
+    Message.success(`已停用 ${res.data.disabled} 张兑换码`)
+    selectedKeys.value = []
+    await Promise.all([loadCodes(), loadStats()])
+  } catch (err) {
+    Message.error(getErrorMessage(err, '批量停用失败'))
+  }
+}
+
+async function handleBatchDestroy() {
+  const ids = selectedKeys.value.map(Number)
+  if (!ids.length) return
+  const confirmed = await confirmDialog(
+      `确定销毁所选 ${ids.length} 张兑换码吗？销毁后从数据库移除、不可恢复，累计发行统计随之减少（已核销的码不可勾选，不受影响）。`,
+      '批量销毁', '销毁', true,
+  )
+  if (!confirmed) return
+  try {
+    const res = await destroyRedeemCodes(ids)
+    Message.success(`已销毁 ${res.data.destroyed} 张兑换码`)
+    selectedKeys.value = []
+    await Promise.all([loadCodes(), loadStats()])
+  } catch (err) {
+    Message.error(getErrorMessage(err, '批量销毁失败'))
   }
 }
 
@@ -483,6 +577,27 @@ onMounted(() => {
   margin-left: auto;
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
+}
+
+/* 批量操作条：勾选行后浮现于表格上方 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-primary-lighter);
+  border-radius: var(--radius-md);
+}
+
+.batch-count {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+}
+
+.batch-clear {
+  margin-left: auto;
 }
 
 /* 表格单元格内容不折行（时间/短数字列保持一行；长文本列已有 ellipsis 不受影响） */

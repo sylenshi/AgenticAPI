@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.log import write_log
@@ -128,6 +128,40 @@ async def disable_code(db: AsyncSession, code_id: int) -> int:
         update(RedeemCodeTable)
         .where(RedeemCodeTable.id == code_id, RedeemCodeTable.status == 1)
         .values(status=0)
+    )
+    await db.commit()
+    return result.rowcount
+
+
+async def batch_disable_codes(db: AsyncSession, ids: list[int]) -> int:
+    """批量停用（仅未使用状态的码生效，已使用/已停用不受影响），返回停用张数"""
+    result = await db.execute(
+        update(RedeemCodeTable)
+        .where(RedeemCodeTable.id.in_(ids), RedeemCodeTable.status == 1)
+        .values(status=0)
+    )
+    await db.commit()
+    return result.rowcount
+
+
+async def destroy_codes(db: AsyncSession, ids: list[int]) -> int:
+    """
+    物理销毁兑换码（未使用/已停用可销毁），返回销毁张数。
+
+    已核销的码禁止销毁：用户端"我的兑换记录"与核销金额统计都直接读本表
+    （used_by + status=2），删码会连带抹掉用户记录、让账目对不上，先校验再删。
+    校验失败抛 ValueError（文案可直接作为 HTTP 400 的 detail）。
+    """
+    result = await db.execute(
+        select(func.count()).select_from(RedeemCodeTable)
+        .where(RedeemCodeTable.id.in_(ids), RedeemCodeTable.status == 2)
+    )
+    used_count = result.scalar_one()
+    if used_count:
+        raise ValueError(f"所选兑换码中有 {used_count} 张已核销，已核销的码承载用户兑换记录，不可销毁")
+    result = await db.execute(
+        delete(RedeemCodeTable)
+        .where(RedeemCodeTable.id.in_(ids), RedeemCodeTable.status.in_((0, 1)))
     )
     await db.commit()
     return result.rowcount

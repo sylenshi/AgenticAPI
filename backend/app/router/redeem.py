@@ -9,6 +9,7 @@ from app.crud import log as log_crud
 from app.crud import redeem_code as redeem_crud
 from app.router.deps import get_db
 from app.schemas.redeem_code import (
+    RedeemBatchSchema,
     RedeemCodeSchema,
     RedeemGenerateSchema,
     RedeemRecordSchema,
@@ -126,3 +127,40 @@ async def disable_code(
         detail=f"停用了兑换码（id={code_id}）",
     )
     return success_response(message="兑换码已停用")
+
+
+@admin_router.put("/batch-disable")
+async def batch_disable_codes(
+        body: RedeemBatchSchema,
+        db: AsyncSession = Depends(get_db),
+        admin=Depends(get_current_admin),
+):
+    """批量停用兑换码（仅未使用状态的码生效，已使用/已停用不受影响）"""
+    disabled = await redeem_crud.batch_disable_codes(db, body.ids)
+    if disabled == 0:
+        raise HTTPException(status_code=400, detail="所选兑换码中没有可停用的未使用码")
+    await log_crud.write_log(
+        db, type="admin", action="disable_redeem_codes", user_id=admin.id, username=admin.username,
+        detail=f"批量停用了 {disabled} 张兑换码（ids={body.ids}）",
+    )
+    return success_response(message=f"已停用 {disabled} 张兑换码", data={"disabled": disabled})
+
+
+@admin_router.delete("")
+async def destroy_codes(
+        body: RedeemBatchSchema,
+        db: AsyncSession = Depends(get_db),
+        admin=Depends(get_current_admin),
+):
+    """物理销毁兑换码（未使用/已停用可销毁；已核销的码承载用户兑换记录，不可销毁）"""
+    try:
+        destroyed = await redeem_crud.destroy_codes(db, body.ids)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if destroyed == 0:
+        raise HTTPException(status_code=400, detail="没有兑换码被销毁")
+    await log_crud.write_log(
+        db, type="admin", action="destroy_redeem_codes", user_id=admin.id, username=admin.username,
+        detail=f"销毁了 {destroyed} 张兑换码（ids={body.ids}）",
+    )
+    return success_response(message=f"已销毁 {destroyed} 张兑换码", data={"destroyed": destroyed})

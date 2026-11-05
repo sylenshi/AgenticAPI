@@ -21,6 +21,11 @@ class RedeemGenerateSchema(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class RedeemBatchSchema(BaseModel):
+    """管理员批量操作兑换码请求（批量停用 / 批量销毁共用）"""
+    ids: list[int] = Field(min_length=1, max_length=100, description="兑换码 id 列表")
+
+
 class RedeemCodeSchema(BaseModel):
     """兑换码信息响应（管理员列表用）"""
     id: int
