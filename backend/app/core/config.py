@@ -147,6 +147,9 @@ class SandboxSettings(BaseSettings):
     SANDBOX_IMAGE: str = "agenticapi-sandbox:latest"
     # 基础镜像（Docker Hub 拉取慢时换国内镜像源；改动会触发镜像重建）
     SANDBOX_BASE_IMAGE: str = "python:3.12-slim"
+    # 镜像构建时的 pip 源（pypi.org 不可达的内网环境换国内镜像，如
+    # https://mirrors.tencentyun.com/pypi/simple；改动会触发镜像重建）
+    SANDBOX_PIP_INDEX_URL: str = "https://pypi.org/simple"
     # 容器空闲多少秒后自动停止（懒启动对偶：用完即停，降低常驻开销）
     SANDBOX_IDLE_STOP_SECONDS: int = 900
     # 同一时刻允许并发执行的沙箱命令数（共享容器，串行化避免输出交叉）

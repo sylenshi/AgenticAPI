@@ -92,9 +92,12 @@ async def docker_available() -> bool:
 
 
 def fingerprint() -> str:
-    """镜像指纹 = sha256(Dockerfile 内容 + 基础镜像名)，Dockerfile 或基础镜像变化即触发重建"""
+    """镜像指纹 = sha256(Dockerfile 内容 + 基础镜像名 + pip 源)，任一变化即触发重建"""
     content = SANDBOX_DIR.joinpath("Dockerfile").read_bytes()
-    return hashlib.sha256(content + sandbox_setting.SANDBOX_BASE_IMAGE.encode()).hexdigest()[:16]
+    raw = (content
+           + sandbox_setting.SANDBOX_BASE_IMAGE.encode()
+           + sandbox_setting.SANDBOX_PIP_INDEX_URL.encode())
+    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 async def _ensure_image() -> bool:
@@ -109,6 +112,7 @@ async def _ensure_image() -> bool:
     rc, out, err = await _run_docker(
         ["build",
          "--build-arg", f"BASE_IMAGE={sandbox_setting.SANDBOX_BASE_IMAGE}",
+         "--build-arg", f"PIP_INDEX_URL={sandbox_setting.SANDBOX_PIP_INDEX_URL}",
          "--label", f"{FINGERPRINT_LABEL}={fp}",
          "-t", sandbox_setting.SANDBOX_IMAGE,
          str(SANDBOX_DIR)],
