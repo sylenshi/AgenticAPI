@@ -29,11 +29,12 @@ class AdminUserBatchDeleteSchema(BaseModel):
 class SettingsUpdateSchema(BaseModel):
     """站点设置更新（部分更新语义，至少传一个字段；均可在控制台-设置页调整）
 
+    alias 与设置页前端提交字段（camelCase，同 GET 响应）对齐；
     agent_default_model 传空串表示清除指定、恢复默认解析链（.env → 首个启用模型）
     """
-    chat_record_max_tokens: int | None = Field(default=None, ge=100, le=1_000_000)
-    agent_default_model: str | None = Field(default=None, max_length=128)
-    register_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000)
-    guest_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000)
+    chat_record_max_tokens: int | None = Field(default=None, ge=100, le=1_000_000, alias="chatRecordMaxTokens")
+    agent_default_model: str | None = Field(default=None, max_length=128, alias="agentDefaultModel")
+    register_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000, alias="registerInitialBalance")
+    guest_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000, alias="guestInitialBalance")
 
     model_config = {"populate_by_name": True}
