@@ -1,4 +1,4 @@
-<!-- 控制台-兑换码：所有用户可兑换充值、查看自己的兑换记录；管理员可生成/管理/监控兑换码 -->
+<!-- 控制台-兑换码：管理员统计与码管理在前；兑换输入与我的记录（所有用户）合并为一张卡在后 -->
 
 <template>
   <div class="redeem-page">
@@ -9,25 +9,7 @@
       </p>
     </header>
 
-    <!-- 兑换卡（所有登录用户） -->
-    <div class="page-card">
-      <div class="redeem-row">
-        <a-input v-model="code" placeholder="输入兑换码，如 AGC-XXXXX-XXXXX-XXXXX" :max-length="64" allow-clear
-                 :style="{width: '340px'}" @press-enter="handleRedeem"/>
-        <a-button type="primary" :loading="redeeming" :disabled="userStore.userInfo?.isGuest" @click="handleRedeem">
-          <template #icon>
-            <icon-gift/>
-          </template>
-          兑换
-        </a-button>
-        <span class="redeem-balance">当前余额 <b>{{ userStore.userInfo?.balance ?? '-' }}</b> 元</span>
-      </div>
-      <p v-if="userStore.userInfo?.isGuest" class="redeem-tip">
-        访客账号不支持兑换，请注册正式账号后再兑换充值。
-      </p>
-    </div>
-
-    <!-- 管理员：兑换码监控统计 -->
+    <!-- 管理员：兑换码监控统计（固定 4 张指标，页底覆盖全局 3 列网格为 4 列） -->
     <div v-if="userStore.isAdmin" class="stat-cards">
       <div class="stat-card stat-accent-violet">
         <div class="stat-label">累计发行（张）</div>
@@ -47,11 +29,12 @@
       </div>
     </div>
 
-    <!-- 管理员：兑换码管理 -->
+    <!-- 管理员：兑换码管理（筛选居左；共 X 张与生成兑换码靠右，创建动作与筛选分离） -->
     <div v-if="userStore.isAdmin" class="page-card">
+      <h3 class="card-title">兑换码管理</h3>
       <div class="filter-bar manage-toolbar">
-        <a-select v-model="filterStatus" placeholder="全部状态" :style="{width: '120px'}" @change="handleSearch">
-          <a-option :value="undefined">全部状态</a-option>
+        <a-select v-model="filterStatus" placeholder="全部状态" allow-clear :style="{width: '120px'}"
+                  @change="handleSearch" @clear="handleSearch">
           <a-option :value="1">未使用</a-option>
           <a-option :value="2">已使用</a-option>
           <a-option :value="0">已停用</a-option>
@@ -60,19 +43,19 @@
                  @press-enter="handleSearch" @clear="handleSearch"/>
         <a-input v-model="batchNo" placeholder="按批次筛选" allow-clear :style="{width: '170px'}"
                  @press-enter="handleSearch" @clear="handleSearch"/>
-        <a-button type="primary" @click="handleSearch">
+        <a-button @click="handleSearch">
           <template #icon>
             <icon-search/>
           </template>
           查询
         </a-button>
+        <span class="manage-total">共 {{ total }} 张</span>
         <a-button type="primary" @click="openGenerate">
           <template #icon>
             <icon-plus/>
           </template>
           生成兑换码
         </a-button>
-        <span class="manage-total">共 {{ total }} 张</span>
       </div>
 
       <a-table
@@ -121,8 +104,23 @@
       />
     </div>
 
-    <!-- 我的兑换记录（所有登录用户） -->
+    <!-- 兑换与我的记录（所有登录用户）：同一用户流程合并为一张卡，放在管理区块之后 -->
     <div class="page-card">
+      <div class="redeem-row">
+        <a-input v-model="code" placeholder="输入兑换码，如 AGC-XXXXX-XXXXX-XXXXX" :max-length="64" allow-clear
+                 :style="{width: '340px'}" @press-enter="handleRedeem"/>
+        <a-button type="primary" :loading="redeeming" :disabled="userStore.userInfo?.isGuest" @click="handleRedeem">
+          <template #icon>
+            <icon-gift/>
+          </template>
+          兑换
+        </a-button>
+        <span class="redeem-balance">当前余额 <b>{{ userStore.userInfo?.balance ?? '-' }}</b> 元</span>
+      </div>
+      <p v-if="userStore.userInfo?.isGuest" class="redeem-tip">
+        访客账号不支持兑换，请注册正式账号后再兑换充值。
+      </p>
+      <a-divider class="redeem-divider"/>
       <h3 class="card-title">我的兑换记录</h3>
       <a-table
           v-if="records.length"
@@ -286,7 +284,7 @@ const keyword = ref('')
 const batchNo = ref('')
 
 const columns: TableColumnData[] = [
-  {title: 'ID', dataIndex: 'id', width: 60, align: 'center'},
+  // 不设 ID 列（码值即业务标识）：9 列合计 1150px，1280px 内容列内完整放下，不再横向滚动
   {title: '兑换码', slotName: 'code', width: 230},
   {title: '面值（元）', slotName: 'amount', width: 90, align: 'right'},
   {title: '状态', slotName: 'status', width: 110, align: 'center'},
@@ -422,6 +420,35 @@ onMounted(() => {
 <style scoped>
 .redeem-page {
   padding: var(--space-5) var(--space-6);
+}
+
+/* 相邻内容卡之间留间距（全局 .page-card 不带 margin，同概览页做法） */
+.page-card + .page-card {
+  margin-top: var(--space-4);
+}
+
+/* 卡内小节标题（同概览页 card-title 约定；全局 typography.css 版本无下边距） */
+.card-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+}
+
+/* 本页统计卡固定 4 张：覆盖全局 3 列网格为 4 列，避免第 4 张孤卡换行；窄屏回落 2 列 */
+.stat-cards {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+@media (max-width: 900px) {
+  .stat-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* 兑换输入行与记录小节的分隔 */
+.redeem-divider {
+  margin: var(--space-4) 0;
 }
 
 /* 兑换卡：输入 + 按钮 + 余额提示 */
