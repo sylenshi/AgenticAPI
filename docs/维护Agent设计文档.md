@@ -466,12 +466,12 @@ CREATE TABLE agent_message (
 | 容器模型 | 全站共享 `agenticapi-sandbox` 一个容器；会话间以 `/workspace/s{会话id}` 工作目录隔离；容器停止即清空（无持久化诉求） |
 | 生命周期 | **懒启动**：首个获批命令触发镜像懒构建（Dockerfile 指纹标签防重复构建）→ 网络懒建 → 容器三态复用（running 直接用 / exited 则 start / 不存在则 run）；**空闲自停**：`main.py` lifespan 挂载看门狗，空闲超 900s `docker stop`（保留容器与镜像，下次秒级拉起；从未用过零 docker 调用） |
 | 驱动方式 | `asyncio.create_subprocess_exec` 调 docker CLI（零新依赖，本机 Windows Docker Desktop 与云端 Linux 行为一致）；`SANDBOX_DOCKER_CMD` 可配 `sudo -n docker` 应对服务器权限 |
-| 镜像 | `backend/sandbox/Dockerfile`（python:3.12-slim + curl + jq + httpx），`SANDBOX_BASE_IMAGE` 可换国内源；改动 Dockerfile 自动触发重建（指纹比对） |
+| 镜像 | `backend/sandbox/Dockerfile`（python:3.12-slim + curl + jq + httpx），`SANDBOX_BASE_IMAGE` / `SANDBOX_PIP_INDEX_URL` / `SANDBOX_APT_MIRROR` 可分别换国内源（Docker Hub、pypi、apt 三者网络状况互不相同，需分别配置）；改动任一项自动触发重建（指纹比对） |
 | 隔离加固 | 独立网桥 `agenticapi-sandbox-net`（与 MySQL 容器隔离）；非 root（uid 1000）；`--cap-drop ALL` + `no-new-privileges`；只读 rootfs + tmpfs `/tmp`(64m)/`/workspace`(256m)；`--memory 512m --cpus 1 --pids-limit 256`；不挂载任何宿主路径/.env/docker socket，不注入渠道密钥 |
 | 网络边界 | 容器可出公网（功能需求）；生产 MySQL 与后端均绑宿主 127.0.0.1，容器网络层不可直达 |
 | 执行语义 | 命令经容器内 coreutils `timeout`（SIGTERM→SIGKILL）包裹，客户端侧 `timeout+30s` 兜底；stdout/stderr 流式经 `sandbox_output` 事件推前端（节流 0.25s/2KB，累计 64KB 保尾部）；最终结果过 `redact()` + 8KB 截断管线 |
 | 审批 | **L1 + always_confirm**：每条命令必弹审批卡（展示完整命令与超时/工作目录），不受"L1 自动批准"开关影响；不占用 L2 每会话 5 次配额，关闭 L2 的只读会话仍可用 |
-| 配置 | `SANDBOX_ENABLED` / `SANDBOX_DOCKER_CMD` / `SANDBOX_IMAGE` / `SANDBOX_BASE_IMAGE` / `SANDBOX_IDLE_STOP_SECONDS`(900) / `SANDBOX_MAX_CONCURRENT`(2) / `SANDBOX_CMD_TIMEOUT_MAX`(120)，全部有默认值、不配可用 |
+| 配置 | `SANDBOX_ENABLED` / `SANDBOX_DOCKER_CMD` / `SANDBOX_IMAGE` / `SANDBOX_BASE_IMAGE` / `SANDBOX_PIP_INDEX_URL` / `SANDBOX_APT_MIRROR` / `SANDBOX_IDLE_STOP_SECONDS`(900) / `SANDBOX_MAX_CONCURRENT`(2) / `SANDBOX_CMD_TIMEOUT_MAX`(120)，全部有默认值、不配可用 |
 
 **残余风险声明**：沙箱内可访问公网任意地址（这是功能需求本身）；容器与宿主共享内核（Docker 隔离级别，非 VM 级）；审批卡是最终人闸——管理员需阅读命令再批准。工作区文件在容器自停后清空，重要产物应引导管理员走导出类工具或让其自行复制。
 

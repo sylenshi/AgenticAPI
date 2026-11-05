@@ -150,6 +150,9 @@ class SandboxSettings(BaseSettings):
     # 镜像构建时的 pip 源（pypi.org 不可达的内网环境换国内镜像，如
     # https://mirrors.tencentyun.com/pypi/simple；改动会触发镜像重建）
     SANDBOX_PIP_INDEX_URL: str = "https://pypi.org/simple"
+    # 镜像构建时的 Debian apt 源主机（deb.debian.org 海外下载慢时换国内源，如
+    # mirrors.cloud.tencent.com；改动会触发镜像重建）
+    SANDBOX_APT_MIRROR: str = "deb.debian.org"
     # 容器空闲多少秒后自动停止（懒启动对偶：用完即停，降低常驻开销）
     SANDBOX_IDLE_STOP_SECONDS: int = 900
     # 同一时刻允许并发执行的沙箱命令数（共享容器，串行化避免输出交叉）
