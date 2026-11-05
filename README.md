@@ -48,13 +48,19 @@ AgenticAPI 是一个基于 Agent 的 API 中转站平台，支持通过 Agent �
   页面双视图：所有登录用户可见兑换入口与「我的兑换记录」，管理区块仅管理员可见（生成/管理/监控）
 - **维护 Agent（站点运维对话式 Agent，前后端）**：控制台「维护Agent」页（`/dashboard/agent`，仅管理员），三栏布局（会话侧栏 / 对话窗口 / 设置面板）；
   后端四阶段 agent 循环（排队→准备→执行→收尾）多轮调用站内任意已启用模型（可会话中切换，下一轮生效），每轮独立经中转链路计费（日志
-  标注"维护Agent调用"、不写对话记录）；**27 个白名单运维工具**按风险三级管控——L0 只读（巡检/统计/拨测/用量）直接执行、L1
-  低危写（渠道改配置/数据导出/技能增删）弹审批卡（可开会话级自动批准）、L2 高危（数据表清理，两阶段 dry-run 先行）强制审批 +
-  每会话 ≤5 次 + 可整会话关闭（只读模式）；所有工具入参/出参递归**脱敏**（密钥只留 `前3****后4` 掩码）、结果截断 8KB、双轨审计（logs
+  标注"维护Agent调用"、不写对话记录）；**36 个白名单运维工具**按风险三级管控——L0 只读（巡检/统计/拨测/用量/联网搜索/沙箱状态）直接执行、L1
+  低危写（渠道改配置/数据导出/技能增删/**新增渠道与模型**/**密钥轮换**）弹审批卡（可开会话级自动批准，含密钥工具强制人审）、L2 高危
+  （数据表清理/**删除渠道与模型**，两阶段 dry-run 先行）强制审批 + 每会话 ≤5 次 + 可整会话关闭（只读模式）；所有工具入参/出参递归**脱敏**
+  （密钥只留 `前3****后4` 掩码，审批卡与 `agent_message.tool_calls` 落库同为掩码版）、结果截断 8KB、双轨审计（logs
   type=admin 流水 + `agent_message` 全轨迹含审批状态）；护栏：24 轮 / 200k token 上限、超长自动脱水压缩、截断防御（finish_reason=length
-  拒绝工具调用）、审批 300s 超时、同会话并发 409；SSE 站内扩展事件 `agenticapi_agent`（工具进度 / 审批卡 / 模型切换 / 导出就绪）实时驱动前端；
+  拒绝工具调用）、审批 300s 超时、同会话并发 409；SSE 站内扩展事件 `agenticapi_agent`（工具进度 / 审批卡 / 模型切换 / 导出就绪 / **沙箱实时输出**）实时驱动前端；
   数据导出走一次性 token（24h 过期、仅一次）下载 zip；内置 6 个运维技能（巡检 / 数据治理 / 渠道排障 / 水位研判 / 新模型上线 / 故障复盘）+
   会话内可教学自定义技能（slug/大小/脱敏校验）；会话服务端持久化（近 30 天 + 每用户保留 50 个，惰性清理）
+- **维护 Agent 容器沙箱（v0.10.0）**：`sandbox_exec` 在隔离 Linux 容器内执行任意命令（curl/jq/python3+httpx 可用、可出公网），覆盖定制工具无法覆盖的长尾运维场景
+  （给定 base_url/key/model 直发验证、拉上游 `/v1/models` 对比定价、脚本化诊断）；**每条命令强制审批**（always_confirm，不受 L1 自动批准豁免）；
+  全站共享单容器 + 懒启动（首个获批命令触发镜像指纹构建）+ 空闲 900s 自动停止，会话间 `/workspace/s{id}` 目录隔离；加固：独立网桥、非 root、
+  cap-drop ALL、no-new-privileges、只读 rootfs、内存/CPU/pids 限额，不挂载宿主路径/密钥；输出流式推送 + 前端折叠控制台；
+  Docker CLI 子进程驱动（Windows 本机与 Linux 云端行为一致，`SANDBOX_DOCKER_CMD` 可配 `sudo -n docker`）
 - **状态码语义**：401 = 未认证（前端清空登录态并弹登录框）；403 = 已登录但无权限（仅提示不登出）
 - **接口规范**：站内管理接口统一响应格式 `{code, message, data}` + 全局异常处理器，规范文档见 [
   `backend/docs/API接口规范.md`](docs/API接口规范.md)；对外中转接口按 OpenAI 报文规范返回（成功透传上游、失败返回
@@ -188,11 +194,12 @@ POST /studio/asr（语音输入）
 ```
 AgenticAPI/
 ├── backend/
+│   ├── sandbox/        # 维护 Agent 容器沙箱镜像（Dockerfile，运行时指纹懒构建）
 │   ├── app/
 │   │   ├── core/         # 配置、数据库引擎与会话
 │   │   ├── router/       # API 路由层（channels / models / operations / user / keys / redeem / admin / monitor / relay / studio / site / maintain_agent）
 │   │   ├── schemas/      # Pydantic 请求/响应模型（驼峰别名映射）
-│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、studio_agent_service 工坊搜索循环、search_service 联网搜索、agent_service 站内 Agent 能力、agent/ 维护Agent 循环与 27 工具、probe_service 渠道拨测、export_service 数据导出）
+│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、studio_agent_service 工坊搜索循环、search_service 联网搜索、agent_service 站内 Agent 能力、agent/ 维护Agent 循环与 36 工具、sandbox_service 容器沙箱、probe_service 渠道拨测、export_service 数据导出）
 │   │   ├── crud/         # 数据访问层（原生 SQL）
 │   │   ├── models/       # SQLAlchemy 表定义（user / user_token / api_key / redeem_code / logs / chat_record / usage_* / system_config / llm_* / agent_session / agent_message）
 │   │   ├── agent_skills/ # 维护 Agent 内置技能（Markdown SOP，frontmatter 元数据）
@@ -222,7 +229,11 @@ AgenticAPI/
 
 1. 在 `backend/` 下创建 `.env`（参考字段：`MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` /
    `MYSQL_DATABASE` / `DEBUG`；可选 `STEPFUN_API_KEY` 配置后开启模型工坊的语音输入与联网搜索、`AGENT_TITLE_MODEL`
-   开启会话自动起标题，不配则语音提示"语音服务未配置"、联网搜索自动降级为普通对话）；
+   开启会话自动起标题，不配则语音提示"语音服务未配置"、联网搜索自动降级为普通对话；
+   维护 Agent 沙箱全部配置项可选、有默认值：`SANDBOX_ENABLED`（默认 true）、`SANDBOX_DOCKER_CMD`
+   （服务器运行用户不在 docker 组时配 `sudo -n docker`）、`SANDBOX_IMAGE` / `SANDBOX_BASE_IMAGE`
+   （Docker Hub 拉取慢时换国内镜像源）、`SANDBOX_IDLE_STOP_SECONDS`（默认 900）、`SANDBOX_MAX_CONCURRENT`、
+   `SANDBOX_CMD_TIMEOUT_MAX`——宿主机需可用 docker CLI，否则沙箱工具返回明确的不可用提示，其余工具不受影响）；
 2. 安装依赖并启动（表结构会在启动时自动创建）：
 
 ```sh
@@ -310,6 +321,7 @@ JSON / SSE 流或返回 OpenAI 结构（`/v1/models` 返回 `{"object": "list", 
 
 | 版本     | 日期         | 说明                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 |--------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| v0.10.0 | 2026-11-05 | 维护 Agent 能力扩展（27 → 36 工具，突破「无 shell」红线 → 修订为「无未审批的 shell」）：**① 容器沙箱**——`sandbox_exec` 在隔离 Linux 容器执行任意命令（curl/jq/python3+httpx、可出公网），覆盖测裸接口/拉 `/v1/models` 对比定价/脚本诊断等长尾场景；每条命令强制审批（L1+always_confirm，不受 L1 自动批准豁免，不占 L2 配额）；全站共享单容器 + 懒启动（Dockerfile 指纹防重复构建）+ 空闲 900s 自停（lifespan 看门狗）；会话间 `/workspace/s{id}` 目录隔离；加固：独立网桥/cap-drop ALL/no-new-privileges/只读 rootfs+tmpfs/内存-CPU-pids 限额/不挂载宿主路径与密钥；docker CLI 子进程驱动（Windows 与 Linux 一致，`SANDBOX_DOCKER_CMD` 支持 `sudo -n docker`）；流式输出事件 `sandbox_output` + 前端折叠控制台（运行中自动滚动、终态可展开、历史回放保留 stdout 尾段）。**② 渠道/模型 CRUD**——`create_channel`/`rotate_channel_key`/`create_model`/`update_model`（L1+强制审批或审批，密钥仅尾4位展示）与 `delete_channel`/`delete_model`（L2 两段式 dry-run，预览孤儿引用影响），复用管理页 service 校验；标准上线链路 create_channel→test_channel→create_model→test_model。**③ `web_search`** 只读工具（复用 StepSearch）。**④ 安全配套**——`redact()` 增加子串级 sk-/Bearer 掩码（长命令内嵌密钥同样掩码）、`agent_message.tool_calls` 落库与历史回显改用脱敏参数（执行用原文）、审批卡 args 脱敏；顺带修复 `maintain_loop.release_session` 缺失。**⑤ 配套**：`SandboxSettings` 7 项配置、`.env.example`、`backend/sandbox/Dockerfile`、设计文档 v1.1 / 功能清单 v1.1；本机冒烟 27 项全通过（容器懒构建/会话隔离/非 root/只读 rootfs/超时杀进程/停止重启）+ HTTP 端到端（真实对话→审批卡→沙箱流式输出→落库无密钥）通过；README 与文档同步。已知取舍：容器停止即清空工作区（无持久化）、沙箱与宿主共享内核（Docker 隔离级别） |
 | v0.9.0 | 2026-10-05 | 站点维护 Agent 上线（控制台「维护Agent」页，仅管理员）：新增 `agent_session` / `agent_message` 两表（会话与全轨迹服务端持久化，含工具调用参数与审批状态变迁，近 30 天 + 每用户 50 会话惰性清理，启动自动建表）；后端四阶段 agent 循环（`app/services/agent/`）多轮驱动站内任意已启用模型（可中途切换、下一轮生效），每轮独立经中转链路计费（`_finalize_call` 新增 `source="agent"` 分支：扣费/写日志/进统计照常，唯一差异不写 `chat_record`）；**27 个白名单运维工具**三级风险管控——L0 只读 19 个直接执行，L1 低危写 5 个弹审批卡（会话级可开自动批准），L2 高危清理 3 个强制审批 + 两阶段 dry-run 先行 + 每会话 ≤5 次 + 可整会话关闭（只读模式）；工具全链路递归脱敏（键名/值形态双识别，密钥留 `前3****后4` 掩码，**库里与前端均无密钥原文**）+ 结果 8KB 截断 + logs type=admin 双轨审计；护栏：24 轮 / 200k token 上限、旧工具结果脱水 + 超限压缩、finish_reason=length 截断防御、审批 300s 超时、同会话并发 409、重启悬空 tool 消息修复；SSE 站内扩展事件 `agenticapi_agent`（tool_start/progress/end、confirm_required/resolved、model_switched、round_end、download_ready）；数据导出 zip + 一次性 token（24h 过期仅一次）；内置 6 个运维技能（`app/agent_skills/`）+ 会话内教学自定义技能（`DATA_DIR/agent_skills`，slug/32KB/脱敏校验，save/delete 均强制审批）；支撑服务新增 `probe_service`（渠道/模型直发拨测免计费）与 `export_service`（JSONL gzip zip 导出）；前端新增三栏对话页（会话侧栏/对话窗口/设置面板，模型选择按分组过滤）与 ToolStatusBar/ApprovalCard/DownloadCard 组件，fetch SSE 复用工坊解析骨架；本机 18 项冒烟全通过（含计费、审批、导出、模型切换、密钥零泄漏）；同步数据库设计文档（新增 5.12/5.13 节）。已知取舍：执行中不支持插话（同会话并发返回 409）；豆包 encrypted_content 加密片段仅内存跨轮、不持久化（重启丢失后自动剪除） |
 | v0.8.1 | 2026-10-03 | 注册分组策略调整：正式注册用户统一进入 **vip** 分组（可调用全部分组模型），访客账号显式固定 **free** 分组（仅免费模型）；`create_user` 显式传 `user_group="vip"`、`create_guest_user` 显式传 `"free"`，`user_group` 列默认值保持 `free` 作最小权限兜底；存量用户不受影响，README/数据库设计文档同步 |
 | v0.8.0 | 2026-10-03 | 兑换码充值链路上线：`redeem_code` 表（码值/面值/三态状态/批次/核销快照，唯一索引 + 批次/使用人索引，启动自动建表）+ 后端用户端（`POST /redeem` 核销、`GET /redeem/records` 记录）与管理端（`/admin/redeem-codes` 生成/分页/统计/停用）接口；核销单事务保证原子性（FOR UPDATE 锁码防并发重复核销 → 状态机 1→2 → 列表达式原子加余额 → 同事务写日志 `auto_commit=False`），访客 403 禁止兑换；前端控制台-兑换页开放给所有登录用户（侧边栏移出 adminPaths），双视图：兑换入口 + 我的兑换记录（全员）、四卡监控统计 + 生成/筛选/停用管理表格（仅管理员），生成结果码列表一键复制；概览页「余额充值」改为跳转兑换页（唯一兑换入口），兑换成功响应直接返回新余额前端即时联动；`docs/数据库设计文档.md` 同步 5.4 节。注意：`frontend/src/views` 下组件 `:style` 数字宽度（如 `{width: 200}`）在本机依赖组合下不生效（Vue 对象样式数字值不自动加 px，CSSOM 静默丢弃），本页已全部改为字符串 `'200px'`，其余页面存量写法待后续统一 |

@@ -168,7 +168,7 @@ async def _run_with_gate(ctx: ToolContext, tool: ToolDef, args: dict) -> Any:
                 impact = f"（预览生成失败：{exc.__class__.__name__}）"
         pending = approval_manager.create(
             session_id=ctx.session["id"], user_id=ctx.user.id,
-            tool=tool.name, args=args, risk=tool.risk, impact=impact,
+            tool=tool.name, args=redact(args), risk=tool.risk, impact=impact,
         )
         await ctx.emit({"type": "confirm_required", **pending.to_event_payload()})
         verdict = await approval_manager.wait(pending)

@@ -1,6 +1,6 @@
 # AgenticAPI 站点维护 Agent · 形态设计（Harness 设计）
 
-> 文档版本：v1.0（设计稿，未实施） ｜ 日期：2026-10-05 ｜ 配套文档：[维护Agent功能清单.md](维护Agent功能清单.md)
+> 文档版本：v1.1（v1.0 已实施于 v0.9.0；v1.1 增补审批式容器沙箱与渠道/模型 CRUD，实施于 v0.10.0） ｜ 日期：2026-11-05 ｜ 配套文档：[维护Agent功能清单.md](维护Agent功能清单.md)
 >
 > 参考资料：[pi的Harness介绍.md](pi的Harness介绍.md)（借鉴其 Loop 分阶段、Error as Data、截断防御、Skills 按需加载等机制，按本站形态改造，详见第 2 节对照表）
 
@@ -9,7 +9,7 @@
 **"白名单工具 + 服务端工具循环 + 人审阀门 + 站内模型即 Provider"的对话式运维 Agent**：
 
 - **大脑可插拔**：管理员可随时把 Agent 的驱动模型切换为站内对外提供的任意模型（走中转链路，天然享受渠道轮询容错），而不是事先写死的某个模型；
-- **手是白名单**：约 22 个封闭注册的工具（见功能清单），无 shell、无任意命令、无通用文件系统访问；
+- **手是白名单 + 一个审批式沙箱**：36 个封闭注册的工具（见功能清单），宿主机上无 shell、无任意命令、无通用文件系统访问；唯一的长尾出口是 `sandbox_exec`——命令在隔离容器内执行、**每条命令强制审批**（v1.1 修订，见第 16 节）；
 - **高危有阀门**：L1/L2 写操作必须经管理员在审批卡片上确认，工具内部还有 dry-run 两段式第二道闸；
 - **全程留痕**：会话消息（含工具轨迹与审批轨迹）服务端持久化，工具执行另写 `logs` 审计。
 
@@ -42,7 +42,7 @@ flowchart LR
 | Skills 按需加载（目录 + read 工具） | **采纳** | system prompt 只注入目录，`load_skill` 工具按需读全文（第 7 节） |
 | steering 插话（执行中消息排队合并） | **采纳** | 执行期间的新消息入 `agent_message` 队列，下一轮 Queue 阶段合并（第 4 节） |
 | durable harness / 断点续跑 | **简化** | 会话与审批状态持久化；进程重启后未决审批自动置 timeout，管理员重发即可，不做自动续跑 |
-| bash / 文件系统 / Edit 等通用工具 | **不采用（红线）** | 运维 Agent 与 Coding Agent 的本质区别：封闭白名单，杜绝注入演变成任意执行 |
+| bash / 文件系统 / Edit 等通用工具 | **不采用宿主机通用工具（红线）；v1.1 起容器沙箱例外** | 运维 Agent 与 Coding Agent 的本质区别：宿主侧封闭白名单，杜绝注入演变成任意执行；v1.1 新增 `sandbox_exec`——隔离容器内可执行任意命令，但每条强制审批（第 16 节） |
 | 模型 = 固定 Provider 配置 | **反向改造（本设计特色）** | 站内模型即 Provider：任何出站模型都能当大脑，会话中途可切换（第 5 节） |
 
 ## 3. 分层架构
@@ -371,6 +371,7 @@ CREATE TABLE agent_message (
 | `model_switched` | `{from, to}` | 会话头部模型联动 + 消息流内轻提示 |
 | `round_end` | `{round, usageSoFar}` | 用量脚注（token 累计） |
 | `download_ready` | `{url, label, size, expiresAt}` | 下载卡片 |
+| `sandbox_output` | `{tool, chunk}` | 沙箱命令实时输出（折叠控制台，运行中自动滚动；v1.1） |
 | `dehydrated` | `{tool, summary}` | 折叠占位提示（长会话） |
 
 错误语义：`data: {"error": {message, type, code}}`（会话级致命错误）+ `data: [DONE]` 收尾，401 处理复用前端现有拦截逻辑。
@@ -378,7 +379,7 @@ CREATE TABLE agent_message (
 ## 12. 安全设计（红线清单）
 
 1. **密钥闭环**：渠道密钥仅存在于后端内存与 `llm_channels` 表；`probe_service` 内部注入请求头；所有工具返回经 `redact()`（递归抹除键名匹配 `api_key/token/password/authorization/cookie` 的字段，值替换为尾 4 位提示）后才进模型上下文、前端、消息表——三处同源同过滤器；
-2. **封闭工具面**：无 shell、无通用文件读写、无 SQL 直通（每个工具 handler 是显式函数，参数经 pydantic 校验）。prompt 注入（如上游报文里藏指令）最坏只能诱导模型调白名单工具，L2 仍有人审；
+2. **封闭工具面**：宿主机侧无 shell、无通用文件读写、无 SQL 直通（每个工具 handler 是显式函数，参数经 pydantic 校验）。prompt 注入（如上游报文里藏指令）最坏只能诱导模型调白名单工具，L2 仍有人审；v1.1 新增的 `sandbox_exec` 是**唯一**的任意命令入口——容器隔离 + 每条强制审批（第 16 节），红线修订为「无未审批的 shell」；
 3. **鉴权**：`/maintain-agent/*` 全部 `Depends(get_current_admin)`；approve 校验审批归属；导出 token 一次性 + 24h 过期；SSE 建立时校验管理员身份（token 在查询串或首包校验，与工坊同模式）；
 4. **审计**：工具执行、审批变迁、模型切换全落库（第 10 节双轨）；
 5. **数据库安全**：清理只走带条件分批 DELETE（LIMIT 5000 + 休止），禁 TRUNCATE/DROP；dry-run 用 COUNT 预览；
@@ -439,6 +440,61 @@ CREATE TABLE agent_message (
 | 3 | **开放 skills 教学保存**：Agent 可在对话中把现场总结的 SOP 固化为自定义 skill 加入技能池（`save_skill` / `delete_skill` / `list_skills`），带 always_confirm 强制全文审批等安全约束 | 第 7.3 / 8.1 节 |
 | 5 | **不做定时巡检**：巡检仅由管理员在对话中主动触发（`site-inspection` skill SOP + `generate_health_report` 工具），无任何 cron | 功能清单 F1 |
 
+### 已决策（2026-11-05，v1.1 / 实施于 v0.10.0）
+
+| # | 决策 | 落点 |
+|---|---|---|
+| 6 | **引入审批式容器沙箱**（`sandbox_exec`）：突破原红线「无 shell」→ 修订为「无未审批的 shell」。全站共享单容器（非每会话一容器，控制服务器压力），懒启动 + 空闲自停；L1 + always_confirm 每条命令强制审批；隔离与限额见第 16 节 | 第 16 节 |
+| 7 | **开放渠道/模型 CRUD 工具**：`create_channel` / `rotate_channel_key` / `create_model` / `update_model`（L1 + always_confirm 或审批）与 `delete_channel` / `delete_model`（L2 + dry-run 两段式）。原「不删除渠道/模型」红线随之修订，用户与余额仍不可由 Agent 操作 | 第 16 节 |
+| 8 | **新增 web_search 只读工具**：复用模型工坊的 StepSearch 通道（0.04 元/次），用于查上游公告/定价/报错 | 第 16 节 |
+| 9 | **tool_calls 参数落库/回显脱敏**：执行用原文、存储与历史回显用 `redact()` 掩码版；`redact()` 增加子串级 sk-/Bearer 匹配（第 12.1 节密钥闭环延伸） | 第 12 节 |
+
 ### 仍开放
 
 4. **模型"支持工具调用"名单**：一期用内置名单 + 运行时降级探测，后续可考虑给 `llm_models` 加 `supports_tools` 布尔列（需手动 DDL，README 有先例流程）。
+
+## 16. v1.1 扩展：审批式容器沙箱 + 渠道/模型 CRUD（2026-11-05）
+
+### 16.1 容器沙箱（`sandbox_exec` / `sandbox_status`）
+
+**动机**：27 个结构化工具无法覆盖运维长尾场景——给定 base_url/key/model 测裸接口、拉上游 `/v1/models` 对比定价、非 OpenAI 形态接口探测、脚本化批量诊断。定制工具永远追不上场景，故补一个受控的任意执行出口。
+
+**形态（共享单容器，非每会话隔离容器）**：
+
+| 维度 | 设计 |
+|---|---|
+| 容器模型 | 全站共享 `agenticapi-sandbox` 一个容器；会话间以 `/workspace/s{会话id}` 工作目录隔离；容器停止即清空（无持久化诉求） |
+| 生命周期 | **懒启动**：首个获批命令触发镜像懒构建（Dockerfile 指纹标签防重复构建）→ 网络懒建 → 容器三态复用（running 直接用 / exited 则 start / 不存在则 run）；**空闲自停**：`main.py` lifespan 挂载看门狗，空闲超 900s `docker stop`（保留容器与镜像，下次秒级拉起；从未用过零 docker 调用） |
+| 驱动方式 | `asyncio.create_subprocess_exec` 调 docker CLI（零新依赖，本机 Windows Docker Desktop 与云端 Linux 行为一致）；`SANDBOX_DOCKER_CMD` 可配 `sudo -n docker` 应对服务器权限 |
+| 镜像 | `backend/sandbox/Dockerfile`（python:3.12-slim + curl + jq + httpx），`SANDBOX_BASE_IMAGE` 可换国内源；改动 Dockerfile 自动触发重建（指纹比对） |
+| 隔离加固 | 独立网桥 `agenticapi-sandbox-net`（与 MySQL 容器隔离）；非 root（uid 1000）；`--cap-drop ALL` + `no-new-privileges`；只读 rootfs + tmpfs `/tmp`(64m)/`/workspace`(256m)；`--memory 512m --cpus 1 --pids-limit 256`；不挂载任何宿主路径/.env/docker socket，不注入渠道密钥 |
+| 网络边界 | 容器可出公网（功能需求）；生产 MySQL 与后端均绑宿主 127.0.0.1，容器网络层不可直达 |
+| 执行语义 | 命令经容器内 coreutils `timeout`（SIGTERM→SIGKILL）包裹，客户端侧 `timeout+30s` 兜底；stdout/stderr 流式经 `sandbox_output` 事件推前端（节流 0.25s/2KB，累计 64KB 保尾部）；最终结果过 `redact()` + 8KB 截断管线 |
+| 审批 | **L1 + always_confirm**：每条命令必弹审批卡（展示完整命令与超时/工作目录），不受"L1 自动批准"开关影响；不占用 L2 每会话 5 次配额，关闭 L2 的只读会话仍可用 |
+| 配置 | `SANDBOX_ENABLED` / `SANDBOX_DOCKER_CMD` / `SANDBOX_IMAGE` / `SANDBOX_BASE_IMAGE` / `SANDBOX_IDLE_STOP_SECONDS`(900) / `SANDBOX_MAX_CONCURRENT`(2) / `SANDBOX_CMD_TIMEOUT_MAX`(120)，全部有默认值、不配可用 |
+
+**残余风险声明**：沙箱内可访问公网任意地址（这是功能需求本身）；容器与宿主共享内核（Docker 隔离级别，非 VM 级）；审批卡是最终人闸——管理员需阅读命令再批准。工作区文件在容器自停后清空，重要产物应引导管理员走导出类工具或让其自行复制。
+
+### 16.2 渠道/模型 CRUD 工具
+
+| 工具 | 等级 | 说明 |
+|---|---|---|
+| `create_channel` | L1 + always_confirm | 新上游接入入口（channel_name/base_url/api_key/support_models…）；密钥仅入参→落库路径瞬时存在，审批卡与返回值只显示尾 4 位；复用管理页 `channel_service` 校验 |
+| `rotate_channel_key` | L1 + always_confirm | 渠道密钥轮换，其他配置不变 |
+| `delete_channel` | L2 + dry-run 两段式 | 首次 `dry_run=true` 预览反向绑定影响（哪些出站模型绑定此渠道、删除后孤儿引用），确认后 `dry_run=false` 真删 |
+| `create_model` | L1 + always_confirm | 新模型上线入口（name/model_group/定价/channels/upstream_name…）；定价直接决定计费，审批卡展示完整配置 |
+| `update_model` | L1 | 定价/分组/渠道绑定/能力开关等字段级 diff 预览；模型名不可改 |
+| `delete_model` | L2 + dry-run 两段式 | dry-run 展示渠道侧 support_models 的孤儿声明影响 |
+
+标准新上游上线链路：`create_channel` → `test_channel` 拨测 → `create_model` → `test_model` 端到端验证。删除操作与管理页行为一致（不级联清理绑定），但 dry-run 预览比管理页更严谨（显式展示孤儿引用）。
+
+### 16.3 web_search 工具
+
+L0，复用 `app/services/search_service.py`（阶跃 StepSearch，0.04 元/次计入 Step Plan Credit，与工坊共用 `STEPFUN_API_KEY`）；未配置密钥时返回可行动降级提示。用途：上游服务商故障公告、模型定价/发布动态、报错信息查证。
+
+### 16.4 安全配套修订（同批落地）
+
+1. `redact()` 增加**子串级**密钥掩码：长文本（如沙箱命令、curl 参数）内嵌的 `sk-…` / `Bearer …` 凭证同样被掩码；仅对高置信前缀做子串匹配，避免误伤长文件名/URL 路径段；
+2. `agent_message.tool_calls` 落库与历史回显的 arguments 改为 `redact()` 后的版本（执行仍用原文）——防密钥经模型回显扩散到后续每一轮上游请求上下文；
+3. 审批卡 `args` 同步脱敏（`registry.py` 创建 approval 时 redact）；
+4. 顺带修复：`maintain_agent.py` 错误分支引用的 `maintain_loop.release_session` 此前不存在（补实现）。

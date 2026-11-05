@@ -43,9 +43,17 @@ function mapHistory(rows: {
         } else if (row.role === 'tool') {
             // 历史回放只有终态：挂到最近一个 assistant 气泡（即本轮工具轮）
             let summary = ''
+            let output: string | undefined
             try {
                 const parsed = JSON.parse(row.content || '{}')
                 summary = parsed?._summary || parsed?.message || '已执行'
+                // 沙箱命令回放：保留 stdout 尾段，刷新后仍可展开查看输出
+                if (typeof parsed?.stdout === 'string' && parsed.stdout) {
+                    const stderr = typeof parsed?.stderr === 'string' && parsed.stderr
+                        ? `\n[stderr]\n${parsed.stderr}` : ''
+                    const text = `${parsed.stdout}${stderr}`
+                    output = text.length > 4096 ? `[…前面已截断…]\n${text.slice(-4096)}` : text
+                }
             } catch {
                 summary = '已执行'
             }
@@ -55,7 +63,7 @@ function mapHistory(rows: {
                 target.toolEvents = target.toolEvents || []
                 target.toolEvents.push({
                     id: `srv-tool-${row.id}`, tool: toolName, status: 'done',
-                    summary: summary.slice(0, 200),
+                    summary: summary.slice(0, 200), output,
                 })
             }
         }
@@ -220,6 +228,21 @@ export const useAgentStore = defineStore('agent', () => {
                     const events = current.toolEvents || []
                     const last = events[events.length - 1]
                     if (last && last.tool === ev.tool) last.progress = {done: ev.done, total: ev.total}
+                    break
+                }
+                case 'sandbox_output': {
+                    // 沙箱命令实时输出：追加到同名 running 工具事件（超长保尾部，与服务端累计口径一致）
+                    const events = current.toolEvents || []
+                    for (let i = events.length - 1; i >= 0; i--) {
+                        const item = events[i]
+                        if (item && item.tool === ev.tool && item.status === 'running') {
+                            const merged = (item.output || '') + ev.chunk
+                            item.output = merged.length > 65536
+                                ? `[…前面已截断…]\n${merged.slice(-65536)}`
+                                : merged
+                            break
+                        }
+                    }
                     break
                 }
                 case 'tool_end': {

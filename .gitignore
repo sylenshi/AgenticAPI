@@ -143,3 +143,4 @@ dmypy.json
 .req.md5.new
 # 维护 Agent 本地冒烟脚本（硬编码本地库口令，仅存本地）
 backend/_smoke_agent.py
+backend/_e2e_sandbox_once.py

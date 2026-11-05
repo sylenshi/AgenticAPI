@@ -24,6 +24,7 @@ from app.crud import channel as channel_crud
 from app.models.user import UserTabel
 from app.services.agent import skills as skill_service
 from app.services.agent.approvals import approval_manager
+from app.services.agent.redact import redact
 from app.services.agent.registry import ToolContext, ToolExecution, execute_tool, tools_payload_for
 from app.services.relay_service import (
     RelayError, _finalize_call, _ordered_channels, _rewrite_sse_model, resolve_target,
@@ -51,22 +52,41 @@ def _error_event(message: str) -> bytes:
     ).encode() + b"\n"
 
 
+def _redact_arguments(raw: str) -> str:
+    """工具调用参数脱敏（存储/回显用）：JSON 解析后 redact 再序列化，
+    解析失败原样返回。执行路径始终用原始参数——本函数只影响落库与前端展示。
+    （防 create_channel / sandbox_exec 命令中嵌入的密钥明文扩散到
+    agent_message 与后续每一轮上游请求上下文）"""
+    if not raw:
+        return raw
+    try:
+        args = json.loads(raw)
+        if isinstance(args, dict):
+            return json.dumps(redact(args), ensure_ascii=False)
+    except (TypeError, ValueError):
+        pass
+    return raw
+
+
 def build_system_prompt(session: dict) -> str:
     """system prompt：角色 + 安全规则 + 工具使用守则 + skill 目录（只注入目录不注入全文）"""
     l2_state = "开启" if session.get("enable_l2") else "关闭（只读模式，L2 工具不可用）"
-    return f"""你是 AgenticAPI 中转站的管理员运维维护 Agent，通过白名单工具对站点进行查询、拨测、数据治理与巡检。
+    return f"""你是 AgenticAPI 中转站的管理员运维维护 Agent，通过白名单工具对站点进行查询、拨测、数据治理、渠道/模型管理与巡检。
 
 【安全规则（必须遵守）】
-1. 只能调用系统提供的白名单工具，没有 shell、没有任意命令、没有通用文件访问；
-2. 渠道密钥等敏感信息永远不会出现在工具结果里，也不要尝试获取或输出它们；
+1. 只能调用系统提供的白名单工具；唯一例外是 sandbox_exec——在隔离容器沙箱内执行命令，每条命令都需管理员审批（无未审批的 shell）；宿主机上没有任何命令执行能力；
+2. 渠道密钥等敏感信息永远不会出现在工具结果里，也不要尝试获取或输出它们；管理员在对话中提供的密钥仅可用于其明确要求的操作（如创建渠道、拨测），不要复述密钥明文；
 3. L1/L2 写操作需要管理员在审批卡片上确认；被拒绝后不要原样重试，先调整方案或说明理由；
-4. 清理类（cleanup_*）工具是两段式：第一次调用必须 dry_run=true 预览删除量，向管理员展示预览并确认其同意后，再用 dry_run=false 真删；
-5. 不修改渠道密钥、不删除用户/模型/渠道、不改用户余额——这些请引导管理员去对应管理页操作。
+4. 清理与删除类工具（cleanup_* / delete_channel / delete_model）是两段式：第一次调用必须 dry_run=true 预览影响，向管理员展示预览并确认其同意后，再用 dry_run=false 真删；
+5. 不删除用户、不改用户余额——这些请引导管理员去对应管理页操作。
 
 【工作守则】
 - 工具失败会以 isError 数据返回：读错误信息修正参数后重试（如纠正渠道名拼写），或换一个途径；
 - 批量操作前先小范围抽查（如 test_channel scope=one），确认没问题再扩大范围；
 - 巡检/排障/治理等任务优先匹配下述技能目录，用 load_skill 读取 SOP 后按流程执行，偏离流程要说明理由；
+- 沙箱（sandbox_exec）是长尾兜底：定制工具能做的不要用沙箱做；需要测试任意 API 端点（给定 base_url/key/model）、拉取上游模型列表对比定价、跑脚本化诊断时才用它，命令保持简短幂等、输出大时用 head/tail/jq 截取；
+- 新上游上线标准链路：create_channel（管理员提供密钥）→ test_channel 拨测 → create_model（含定价）→ test_model 端到端验证，各步审批卡会呈现完整配置；
+- 联网查证（上游故障公告/定价变更/报错信息）用 web_search；
 - 回答使用中文，运维数据用简洁结构化格式（表格/列表），金额保留 4 位小数。
 
 【技能目录（按需 load_skill 加载全文）】
@@ -190,6 +210,11 @@ async def repair_dangling_tool_calls(db: AsyncSession, session_id: int) -> int:
                 )
                 repaired += 1
     return repaired
+
+
+def release_session(session_id: int) -> None:
+    """释放会话执行锁（路由层异常分支用——StreamingResponse 构造失败等场景）"""
+    _RUNNING.discard(session_id)
 
 
 async def run_chat(db: AsyncSession, session, user: UserTabel, content: str) -> StreamingResponse:
@@ -355,10 +380,11 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
             calls = [st["tool_calls"][i] for i in sorted(st["tool_calls"])]
             truncated = st["finish_reason"] == "length"
 
-            # ── 落库本轮 assistant 消息（含 tool_calls 原文）──
+            # ── 落库本轮 assistant 消息（tool_calls 参数脱敏：执行用原文，落库/回显/历史用掩码版）──
             assistant_tool_calls = [
                 {"id": c["id"] or f"call_{round_no}_{n}", "type": "function",
-                 "function": {"name": c["name"] or "", "arguments": c["arguments"] or "{}"}}
+                 "function": {"name": c["name"] or "",
+                              "arguments": _redact_arguments(c["arguments"] or "{}")}}
                 for n, c in enumerate(calls)
             ]
             await agent_crud.insert_message(
@@ -382,7 +408,7 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
                 call_id = assistant_tool_calls[n]["id"]
                 tool_name = c["name"] or ""
                 yield _agent_event({"type": "tool_start", "tool": tool_name,
-                                    "digest": (c["arguments"] or "")[:120]})
+                                    "digest": _redact_arguments(c["arguments"] or "")[:120]})
 
                 if truncated:
                     # 截断防御：length 截断的残缺调用一律判失败不执行

@@ -4,6 +4,7 @@
 export type agentStreamEvent =
     | { type: 'tool_start'; tool: string; digest?: string }
     | { type: 'tool_progress'; tool: string; done: number; total: number }
+    | { type: 'sandbox_output'; tool: string; chunk: string }
     | { type: 'tool_end'; tool: string; ok: boolean; summary?: string }
     | { type: 'confirm_required'; approvalId: string; tool: string; args: Record<string, unknown>; impact: string; riskLevel: string; expiresIn: number }
     | { type: 'confirm_resolved'; approvalId: string; result: 'approved' | 'rejected' | 'timeout' }
@@ -22,6 +23,8 @@ export interface agentToolEvent {
     progress?: { done: number; total: number }
     /** 完成后的一句话结果摘要 */
     summary?: string
+    /** 沙箱命令实时输出（sandbox_output 聚合，超长保尾部） */
+    output?: string
 }
 
 /** 审批卡片状态（confirm_required 到 confirm_resolved 的生命周期） */

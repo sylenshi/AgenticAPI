@@ -126,9 +126,39 @@ class AntigravityOpsSettings(BaseSettings):
     ANTIGRAVITY_API_KEY: str = ""
 
 
+class SandboxSettings(BaseSettings):
+    """维护 Agent 容器沙箱配置
+
+    沙箱为全站共享单容器（懒启动 + 空闲自停），经 docker CLI 子进程驱动，
+    Windows 本机（Docker Desktop）与 Linux 云端行为一致。
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE_PATH),
+        env_file_encoding='utf-8',
+        extra='ignore', # 忽略 .env 中未定义的变量
+    )
+
+    # 沙箱总开关（关闭后 sandbox_exec 返回不可用提示，其余工具不受影响）
+    SANDBOX_ENABLED: bool = True
+    # docker 命令前缀：默认直接 docker；服务器运行用户不在 docker 组时可配 "sudo -n docker"
+    SANDBOX_DOCKER_CMD: str = "docker"
+    # 沙箱镜像名（懒构建产物）
+    SANDBOX_IMAGE: str = "agenticapi-sandbox:latest"
+    # 基础镜像（Docker Hub 拉取慢时换国内镜像源；改动会触发镜像重建）
+    SANDBOX_BASE_IMAGE: str = "python:3.12-slim"
+    # 容器空闲多少秒后自动停止（懒启动对偶：用完即停，降低常驻开销）
+    SANDBOX_IDLE_STOP_SECONDS: int = 900
+    # 同一时刻允许并发执行的沙箱命令数（共享容器，串行化避免输出交叉）
+    SANDBOX_MAX_CONCURRENT: int = 2
+    # 单条命令超时上限（秒）
+    SANDBOX_CMD_TIMEOUT_MAX: int = 120
+
+
 agent_setting = AgentSettings()
 setting = MysqlSettings()
 server_setting = ServerSettings()
 zai_ops_setting = ZaiOpsSettings()
 commandcode_ops_setting = CommandCodeOpsSettings()
 antigravity_ops_setting = AntigravityOpsSettings()
+sandbox_setting = SandboxSettings()

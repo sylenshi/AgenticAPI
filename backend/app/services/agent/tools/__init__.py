@@ -7,6 +7,8 @@ from app.services.agent.tools.data_tools import register_data_tools
 from app.services.agent.tools.ops_tools import register_ops_tools
 from app.services.agent.tools.session_tools import register_session_tools
 from app.services.agent.tools.skill_tools import register_skill_tools
+from app.services.agent.tools.sandbox_tools import register_sandbox_tools
+from app.services.agent.tools.web_tools import register_web_tools
 
 register_channel_tools()
 register_usage_tools()
@@ -15,3 +17,5 @@ register_data_tools()
 register_ops_tools()
 register_session_tools()
 register_skill_tools()
+register_sandbox_tools()
+register_web_tools()

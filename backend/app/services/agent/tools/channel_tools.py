@@ -1,15 +1,21 @@
 """渠道管理域工具：A1 查询 / A2 连通性测试 / A3 配置修改 / A4 绑定一致性检查
++ A5 新增 / A6 密钥轮换 / A7 删除（v0.10.0）
 
 密钥红线：A1 返回的渠道信息永不携带 api_key，仅 apiKeyHint（尾 4 位）；
-A2 的密钥注入发生在 probe_service 内部。
+A2 的密钥注入发生在 probe_service 内部；A5/A6 的 api_key 仅在入参→service
+落库路径上瞬时存在，审批卡与 agent_message 均为脱敏版本（registry 管线），
+工具返回值只带尾 4 位提示。
 """
 
 import json
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud import channel as channel_crud
 from app.crud import model as model_crud
+from app.schemas.channel import ChannelSchema
+from app.services import channel_service
 from app.services.agent.registry import ToolContext, ToolDef, register
 from app.services import probe_service
 from app.utils.json_utils import parse_json_list
@@ -196,6 +202,142 @@ async def check_binding_consistency(ctx: ToolContext, args: dict) -> dict:
     }
 
 
+async def _create_channel_preview(ctx: ToolContext, args: dict) -> str:
+    """A5 审批卡预览：完整配置摘要，密钥只留尾 4 位"""
+    support = args.get("support_models") or []
+    key = args.get("api_key") or ""
+    hint = f"****{key[-4:]}" if len(key) >= 8 else "（无效过短密钥，执行会被拒绝）"
+    return (f"将新增上游渠道「{args.get('channel_name')}」：\n"
+            f"· base_url：{args.get('base_url')}\n"
+            f"· 密钥：{hint}（明文不展示）\n"
+            f"· 支持模型：{len(support)} 个\n"
+            f"· 超时：{args.get('timeout', 30)}s ｜ 状态：{'启用' if args.get('status', True) else '停用'}\n"
+            f"· 描述：{args.get('description') or '（空）'}")
+
+
+async def create_channel(ctx: ToolContext, args: dict) -> dict:
+    """A5 新增渠道（L1 强制审批）：复用管理页 service 校验（重名 400 → ValueError）"""
+    channel_name = (args.get("channel_name") or "").strip()
+    base_url = (args.get("base_url") or "").strip()
+    api_key = (args.get("api_key") or "").strip()
+    support = args.get("support_models")
+    timeout = args.get("timeout", 30)
+
+    if not channel_name:
+        raise ValueError("channel_name 不能为空")
+    if not base_url.startswith(("http://", "https://")):
+        raise ValueError(f"base_url 需以 http:// 或 https:// 开头，收到：{base_url}")
+    if len(api_key) < 8:
+        raise ValueError("api_key 至少 8 个字符（上游密钥一般远长于此，疑似传错）")
+    if not isinstance(support, list) or not support or not all(isinstance(m, str) and m.strip() for m in support):
+        raise ValueError("support_models 必须为非空字符串数组（至少一个上游模型名）")
+    if not 5 <= int(timeout) <= 600:
+        raise ValueError(f"timeout 需在 5~600 秒之间，收到 {timeout}")
+
+    schema = ChannelSchema(
+        channel_name=channel_name, base_url=base_url, api_key=api_key,
+        support_models=[m.strip() for m in support], status=bool(args.get("status", True)),
+        timeout=int(timeout), description=args.get("description") or None,
+    )
+    try:
+        channel_id = await channel_service.create_channel(ctx.db, schema)
+    except HTTPException as exc:
+        raise ValueError(f"创建渠道失败：{exc.detail}")
+    return {
+        "ok": True, "channel": channel_name, "channelId": channel_id,
+        "hint": f"建议下一步：test_channel(channel_name='{channel_name}', scope='one') 验证连通性",
+        "_summary": f"渠道「{channel_name}」已创建（id={channel_id}，支持 {len(support)} 个模型）",
+    }
+
+
+async def _rotate_channel_key_preview(ctx: ToolContext, args: dict) -> str:
+    channel = await channel_crud.get_by_name(ctx.db, (args.get("channel_name") or "").strip())
+    if not channel:
+        return f"渠道 {args.get('channel_name')} 不存在（执行会被拒绝）"
+    key = args.get("api_key") or ""
+    new_hint = f"****{key[-4:]}" if len(key) >= 8 else "（无效过短密钥，执行会被拒绝）"
+    return (f"将轮换渠道「{channel['channel_name']}」的 API 密钥：\n"
+            f"· 旧密钥：{_key_hint(channel.get('api_key'))}\n"
+            f"· 新密钥：{new_hint}（明文不展示）\n"
+            f"· 上游 base_url 不变：{channel['base_url']}")
+
+
+async def rotate_channel_key(ctx: ToolContext, args: dict) -> dict:
+    """A6 渠道密钥轮换（L1 强制审批）：新密钥仅瞬时落库，不回显"""
+    channel_name = (args.get("channel_name") or "").strip()
+    api_key = (args.get("api_key") or "").strip()
+    if not await channel_crud.get_by_name(ctx.db, channel_name):
+        raise ValueError(f"渠道 {channel_name} 不存在，可用渠道见 list_channels 结果")
+    if len(api_key) < 8:
+        raise ValueError("api_key 至少 8 个字符")
+
+    try:
+        await channel_service.update_channel(
+            ctx.db, channel_name, ChannelSchema(api_key=api_key))
+    except HTTPException as exc:
+        raise ValueError(f"密钥轮换失败：{exc.detail}")
+    return {
+        "ok": True, "channel": channel_name, "apiKeyHint": _key_hint(api_key),
+        "hint": f"建议下一步：test_channel(channel_name='{channel_name}', scope='one') 验证新密钥",
+        "_summary": f"渠道「{channel_name}」密钥已轮换（新密钥尾4位 {_key_hint(api_key)}）",
+    }
+
+
+async def _delete_channel_preview(ctx: ToolContext, args: dict) -> str:
+    """A7 审批卡预览：渠道信息 + 反向绑定影响（删除会产生孤儿引用的模型清单）"""
+    channel_name = (args.get("channel_name") or "").strip()
+    channel = await channel_crud.get_by_name(ctx.db, channel_name)
+    if not channel:
+        return f"渠道 {channel_name} 不存在（执行会被拒绝）"
+    bound = (await _model_bindings(ctx.db)).get(channel_name, [])
+    lines = [f"将删除上游渠道「{channel_name}」（base_url={channel['base_url']}，"
+             f"状态{'启用' if channel.get('status') else '停用'}）"]
+    if bound:
+        lines.append(f"⚠ 有 {len(bound)} 个出站模型绑定此渠道：{', '.join(bound[:10])}"
+                     + ("…" if len(bound) > 10 else ""))
+        lines.append("删除后这些模型将出现孤儿渠道引用（拨测/调用时该渠道报不存在），"
+                     "建议先用 update_model 解绑或改绑。")
+    else:
+        lines.append("无出站模型绑定此渠道，删除无联动影响。")
+    if not args.get("dry_run"):
+        lines.append("（本次为真删）")
+    return "\n".join(lines)
+
+
+async def delete_channel(ctx: ToolContext, args: dict) -> dict:
+    """A7 删除渠道（L2 两阶段）：dry_run=true 预览影响，确认后 dry_run=false 真删"""
+    channel_name = (args.get("channel_name") or "").strip()
+    if "dry_run" not in args or not isinstance(args["dry_run"], bool):
+        raise ValueError("dry_run 必须显式传 true / false（首次预览传 true）")
+    dry_run = args["dry_run"]
+
+    channel = await channel_crud.get_by_name(ctx.db, channel_name)
+    if not channel:
+        raise ValueError(f"渠道 {channel_name} 不存在，可用渠道见 list_channels 结果")
+    bound = (await _model_bindings(ctx.db)).get(channel_name, [])
+
+    if dry_run:
+        return {
+            "dryRun": True, "channel": channel_name,
+            "baseUrl": channel["base_url"], "status": bool(channel.get("status")),
+            "supportModels": parse_json_list(channel.get("support_models")),
+            "boundModels": bound,
+            "orphanWarning": (f"删除后 {len(bound)} 个出站模型将产生孤儿渠道引用：{', '.join(bound)}"
+                              if bound else "无绑定影响"),
+            "_summary": f"[dry-run] 删除渠道「{channel_name}」预览：绑定影响 {len(bound)} 个模型",
+        }
+
+    try:
+        await channel_service.remove_channel(ctx.db, channel_name)
+    except HTTPException as exc:
+        raise ValueError(f"删除渠道失败：{exc.detail}")
+    return {
+        "ok": True, "channel": channel_name, "boundModelsLeft": bound,
+        "_summary": (f"渠道「{channel_name}」已删除"
+                     + (f"；注意：{len(bound)} 个模型仍有对它的绑定引用，建议尽快解绑" if bound else "")),
+    }
+
+
 def register_channel_tools() -> None:
     register(ToolDef(
         name="list_channels",
@@ -232,4 +374,40 @@ def register_channel_tools() -> None:
         description="检查渠道 support_models 与模型 channels 双向软引用的一致性（孤儿引用/单向绑定/停用渠道），只报告不修复。",
         parameters={"type": "object", "properties": {}, "required": []},
         risk="L0", handler=check_binding_consistency,
+    ))
+    register(ToolDef(
+        name="create_channel",
+        description=("新增上游渠道（L1 写操作，强制审批）：接入新上游的入口。需要 channel_name / base_url（OpenAI 兼容端点）/"
+                     "/ api_key / support_models（该渠道支持的上游模型名列表）。创建后建议 test_channel 拨测验证。"
+                     "密钥只在审批与落库路径上瞬时存在，任何返回与卡片都不展示明文。"),
+        parameters={"type": "object", "properties": {
+            "channel_name": {"type": "string", "description": "渠道名（唯一，定位键）"},
+            "base_url": {"type": "string", "description": "上游 OpenAI 兼容端点（http/https 开头）"},
+            "api_key": {"type": "string", "description": "上游 API 密钥（≥8 字符，审批卡仅显示尾4位）"},
+            "support_models": {"type": "array", "items": {"type": "string"},
+                               "description": "该渠道支持的上游模型名列表（非空）"},
+            "timeout": {"type": "integer", "description": "上游请求超时秒数（5~600，默认 30）"},
+            "status": {"type": "boolean", "description": "初始状态（默认启用）"},
+            "description": {"type": "string", "description": "渠道描述（可选，≤200字）"},
+        }, "required": ["channel_name", "base_url", "api_key", "support_models"]},
+        risk="L1", handler=create_channel, always_confirm=True, preview=_create_channel_preview,
+    ))
+    register(ToolDef(
+        name="rotate_channel_key",
+        description="轮换渠道 API 密钥（L1 写操作，强制审批）：上游密钥过期/更换时使用，其他配置不变。审批卡与返回值仅显示新密钥尾4位。",
+        parameters={"type": "object", "properties": {
+            "channel_name": {"type": "string", "description": "渠道名（定位键）"},
+            "api_key": {"type": "string", "description": "新的上游 API 密钥（≥8 字符）"},
+        }, "required": ["channel_name", "api_key"]},
+        risk="L1", handler=rotate_channel_key, always_confirm=True, preview=_rotate_channel_key_preview,
+    ))
+    register(ToolDef(
+        name="delete_channel",
+        description=("删除上游渠道（L2 高危，两阶段）：首次必须 dry_run=true 预览（含哪些出站模型绑定此渠道的孤儿引用影响），"
+                     "向管理员展示预览并确认同意后，再 dry_run=false 真删。有模型绑定时建议先 update_model 解绑。"),
+        parameters={"type": "object", "properties": {
+            "channel_name": {"type": "string", "description": "渠道名（定位键）"},
+            "dry_run": {"type": "boolean", "description": "true=预览影响（首次必传），false=真删（需管理员确认预览后）"},
+        }, "required": ["channel_name", "dry_run"]},
+        risk="L2", handler=delete_channel, preview=_delete_channel_preview,
     ))

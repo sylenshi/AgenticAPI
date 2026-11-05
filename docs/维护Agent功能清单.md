@@ -1,6 +1,6 @@
 # AgenticAPI 站点维护 Agent · 功能清单
 
-> 文档版本：v1.0（设计稿，未实施） ｜ 日期：2026-10-05 ｜ 配套文档：[维护Agent设计文档.md](维护Agent设计文档.md)
+> 文档版本：v1.1（v1.0 已实施于 v0.9.0；v1.1 增补沙箱/渠道模型 CRUD/联网搜索，实施于 v0.10.0） ｜ 日期：2026-11-05 ｜ 配套文档：[维护Agent设计文档.md](维护Agent设计文档.md)
 >
 > 入口：`/dashboard/agent`（仅管理员），对话框式维护助手。全部功能一次规划、一次实现，不做分期。
 
@@ -10,8 +10,8 @@
 
 三条产品红线（贯穿所有功能）：
 
-1. **密钥不可见**：上游渠道密钥只存在于后端，工具注入使用，模型上下文与前端均不可见；
-2. **无任意执行**：Agent 只有封闭的白名单工具，不提供 shell / 任意命令 / 文件系统通用工具；
+1. **密钥不可见**：上游渠道密钥只存在于后端，工具注入使用，模型上下文与前端均不可见（审批卡与消息落库亦为掩码版）；
+2. **无任意执行**：宿主机上 Agent 只有封闭的白名单工具，不提供 shell / 任意命令 / 通用文件访问；唯一例外是 **v1.1 新增的容器沙箱 `sandbox_exec`**——命令在隔离容器内执行且每条强制审批（红线修订为「无未审批的 shell」）；
 3. **高危必人审**：所有破坏性操作必须经管理员确认后才执行，全过程审计落库。
 
 计费口径（已决策）：Agent 大脑的模型调用**走管理员个人消费**（完全复用现有中转计费链路，按模型定价扣余额，额度管理员自定）；拨测类工具直发上游、免计费；查询/导出类工具只读无消耗。后续所有功能实现均以**复用已有链路为优先**。
@@ -24,11 +24,17 @@
 | A 渠道管理 | A2 渠道连通性测试（单模型抽查 / 全模型遍历） | 只读 | L0 | `test_channel` |
 | A 渠道管理 | A3 渠道配置修改（启停/超时/描述/支持模型） | 写 | L1 | `update_channel` |
 | A 渠道管理 | A4 渠道-模型绑定一致性检查 | 只读 | L0 | `check_binding_consistency` |
+| A 渠道管理 | A5 新增渠道（接入新上游） | 写 | L1+强制审批 | `create_channel` |
+| A 渠道管理 | A6 渠道密钥轮换 | 写 | L1+强制审批 | `rotate_channel_key` |
+| A 渠道管理 | A7 删除渠道（两段式） | 写 | L2 | `delete_channel` |
 | B 上游用量 | B1 TokenPlan 用量查询（5h/周/月三窗口） | 只读 | L0 | `get_upstream_usage` |
 | B 上游用量 | B2 上游凭证到期查询 | 只读 | L0 | `get_token_expiry` |
 | C 出站模型 | C1 模型信息查询（定价/分组/渠道绑定） | 只读 | L0 | `get_model_info` |
 | C 出站模型 | C2 单模型拨测（连通性 + 时延） | 只读 | L0 | `test_model` |
 | C 出站模型 | C3 全量模型巡检（批量拨测 + 汇总报告） | 只读 | L0 | `test_all_models` |
+| C 出站模型 | C4 新增模型（含定价，新上游上线） | 写 | L1+强制审批 | `create_model` |
+| C 出站模型 | C5 模型配置修改（定价/分组/渠道绑定等） | 写 | L1 | `update_model` |
+| C 出站模型 | C6 删除模型（两段式） | 写 | L2 | `delete_model` |
 | D 数据治理 | D1 对话记录容量统计 | 只读 | L0 | `get_chat_record_stats` |
 | D 数据治理 | D2 对话记录导出（zip 下载链接） | 写文件 | L1 | `export_chat_records` |
 | D 数据治理 | D3 对话记录清理（保留策略，两段式） | 写库 | L2 | `cleanup_chat_records` |
@@ -44,6 +50,9 @@
 | F 系统功能 | F4 模型切换（站内任意模型驱动） | 内建 | — | `switch_model`（工具形式暴露） |
 | F 系统功能 | F5 Skills 按需加载 + 自定义教学保存 | 内建+写 | L0/L1 | `load_skill` / `list_skills` / `save_skill` / `delete_skill` |
 | F 系统功能 | F6 危险命令人工审核 | 内建 | — | （harness 内建） |
+| G 容器沙箱 | G1 沙箱命令执行（隔离容器，每条审批） | 任意 | L1+强制审批 | `sandbox_exec` |
+| G 容器沙箱 | G2 沙箱状态查询（镜像/容器/空闲） | 只读 | L0 | `sandbox_status` |
+| W 联网搜索 | W1 联网搜索（上游公告/定价/报错查证） | 只读 | L0 | `web_search` |
 
 风险等级定义（与设计文档第 8 节审批流对应）：
 
@@ -72,6 +81,15 @@ L1 审批卡片展示变更 diff（字段级前后对比）。**不开放修改�
 背景：`llm_channels.support_models` 与 `llm_models.channels` 是双向 JSON 软引用、无外键约束（见数据库设计文档 5.6 节），人工维护极易不同步（渠道删了模型、模型换了渠道、单向引用、引用不存在的对象）。
 行为：全表交叉比对两个方向，输出不一致清单（孤儿引用、单向绑定、指向已停用渠道/模型的绑定）与修复建议。只报告不自动修复（修复动作由管理员确认后走 A3 / 模型管理页）。
 
+**A5 新增渠道 `create_channel`（v1.1）**
+参数：`channel_name / base_url / api_key / support_models / timeout / status / description`。L1 + always_confirm：审批卡展示完整配置、密钥仅尾 4 位。复用管理页 `channel_service.create_channel`（重名校验等一致）。返回不含密钥明文。创建后建议 `test_channel` 拨测。
+
+**A6 渠道密钥轮换 `rotate_channel_key`（v1.1）**
+参数：`channel_name / api_key`。L1 + always_confirm，审批卡「旧密钥 **** → 新密钥 ****」。密钥仅在入参→落库路径瞬时存在；`agent_message.tool_calls` 与审批卡均为脱敏版。
+
+**A7 删除渠道 `delete_channel`（v1.1，L2 两段式）**
+首次 `dry_run=true` 返回渠道信息 + 反向绑定影响（哪些出站模型绑定它、删除后孤儿引用）；确认后 `dry_run=false` 真删。与管理页行为一致（不级联清理绑定），但预览更严谨。
+
 ### B. 上游用量域（只读，对应现有 `/dashboard/operations` 页）
 
 **B1 TokenPlan 用量查询 `get_upstream_usage`**
@@ -92,6 +110,15 @@ L1 审批卡片展示变更 diff（字段级前后对比）。**不开放修改�
 
 **C3 全量模型巡检 `test_all_models`**
 遍历所有启用的出站模型执行 C2，内部并发（限 5）+ 总超时 180s + 进度通过 SSE 事件实时上报。产出汇总：`总模型数 / 可用数 / 可用率 / 平均时延 / 失败清单（模型 × 渠道 × 错误）`。报告全文不超过截断阈值，明细大表自动转存导出文件返回下载链接。
+
+**C4 新增模型 `create_model`（v1.1）**
+参数：`name / model_group / channels / 定价四件（input/cache/output/per_request）/ is_request_mode / upstream_name / context_length / max_tokens / support_vision / status / is_log`。L1 + always_confirm——定价直接决定计费，审批卡展示完整配置。渠道存在性提前校验（不存在则引导先 `create_channel`）。标准上线链路：`create_channel` → `test_channel` → `create_model` → `test_model`。
+
+**C5 模型配置修改 `update_model`（v1.1）**
+除 `name` 外上述字段均可改；L1 审批卡展示字段级前后 diff。可用于解绑/改绑渠道（修复孤儿引用）。
+
+**C6 删除模型 `delete_model`（v1.1，L2 两段式）**
+首次 `dry_run=true` 展示模型配置 + 渠道侧 `support_models` 仍声明此模型的孤儿影响；确认后真删。
 
 ### D. 数据治理域（防 MySQL 膨胀）
 
@@ -127,18 +154,27 @@ L1 审批卡片展示变更 diff（字段级前后对比）。**不开放修改�
 **F5 Skills（内置 SOP 按需加载 + 自定义教学保存，已决策开放）**：内置运维 SOP（巡检 / 数据治理 / 渠道排障 / 水位研判 / 新模型上线检查 / 故障复盘），system prompt 只注入目录，`load_skill` 按需读取全文；管理员可在对话中把现场总结的经验固化为自定义 skill 加入技能池——`save_skill`（写 `data/agent_skills/`，同名覆盖更新）、`delete_skill`（仅可删自定义）、`list_skills`（池子全览）。写操作带 `always_confirm` 强制全文审批（不受"L1 自动批准"豁免）、name slug 校验防路径穿越、落盘前过脱敏过滤器、单文件 ≤32KB、内置 skill 物理隔离不可覆盖。详见设计文档第 7.3 节。
 **F6 人工审核**：L1/L2 分级审批流（SSE 确认事件 + 审批端点 + 超时自动拒绝），详见设计文档第 8 节。
 
+### G. 容器沙箱域（v1.1 新增）
+
+**G1 沙箱命令执行 `sandbox_exec`（L1 + always_confirm，每条命令强制审批）**
+在隔离的 Linux 容器（python:3.12-slim + curl/jq/httpx）内执行任意 shell 命令，覆盖定制工具无法覆盖的长尾场景：给定 base_url/key/model 直发请求验证可用性、拉取上游 `/v1/models` 对比定价、非 OpenAI 形态接口探测、脚本化批量诊断。全站共享单容器、懒启动 + 空闲 900s 自停、会话间 `/workspace/s{会话id}` 目录隔离；加固：独立网桥、非 root、cap-drop ALL、no-new-privileges、只读 rootfs、内存/CPU/pids 限额、不挂载宿主路径与密钥。输出流式推送（`sandbox_output` 事件）+ 折叠控制台展示。隔离细节与残余风险见设计文档第 16.1 节。
+
+**G2 沙箱状态查询 `sandbox_status`（L0）**：Docker 可用性 / 镜像就绪与是否最新 / 容器状态 / 空闲时长。
+
+### W. 联网搜索域（v1.1 新增）
+
+**W1 联网搜索 `web_search`（L0）**：复用模型工坊的阶跃 StepSearch 通道（0.04 元/次计入 Step Plan Credit），查上游服务商故障公告、模型定价/发布动态、报错信息。未配置 `STEPFUN_API_KEY` 时返回可行动降级提示。
+
 ## 4. 明确不做的边界
 
 | 不做的事 | 原因 |
 |---|---|
-| shell / 任意命令执行 / 通用文件系统工具 | 安全红线：工具封闭白名单，杜绝 prompt 注入演变成 RCE |
-| 修改渠道密钥（apiKey） | 密钥不得经过模型上下文与前端 |
-| 删除用户 / 模型 / 渠道等结构性删除 | 误删成本高，保留在管理页人工操作 |
-| 修改用户余额 / 封禁 / 分组 | 资金与权限敏感，保留在用户管理页 |
-| 修改模型定价 / 新建模型 | 低频且需人工斟酌，Agent 只读模型配置（A 域仅开放渠道属性修改） |
+| **宿主机** shell / 任意命令执行 / 通用文件系统工具 | 安全红线：宿主侧工具封闭白名单，杜绝 prompt 注入演变成宿主 RCE（v1.1 例外：隔离容器内的 `sandbox_exec`，每条强制审批） |
+| 删除用户 / 修改用户余额 / 封禁 / 分组 | 资金与权限敏感，保留在用户管理页（渠道/模型的删除已按 L2 两段式开放，v1.1） |
 | 直接 `TRUNCATE` / `DROP` 任何表 | 只允许带条件分批 DELETE，可审计可中断 |
 | 服务端定时巡检 / cron 定时任务 | 巡检仅由管理员对话触发（F1 skill SOP 编排），不做主动定时（已决策） |
 | Agent 对话写 chat_record | 维护对话不属于业务中转，独立会话表存储 |
+| 沙箱文件持久化 / 每会话独立容器 | 共享单容器 + 容器自停即清空，控制服务器资源占用（v1.1 已决策） |
 
 ## 5. 验收口径（每项功能的完成定义）
 
