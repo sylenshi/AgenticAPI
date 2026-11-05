@@ -260,8 +260,8 @@ if await channel_crud.get_id_by_name(db, channel_name):
 
 | 方法   | 路径                                    | 鉴权   | 说明                                                                     |
 |------|---------------------------------------|------|------------------------------------------------------------------------|
-| GET  | `/operations/get?refresh_channel=all` | 需管理员 | 获取上游用量数据，`refresh_channel` 可选 `vol` / `stepfun` / `zai` / `zai2` / `cc` / `all`       |
-| POST | `/operations/upload`                  | 需管理员 | 更新上游运维凭证（Body 传 `brmToken` / `instanceId` / `stepToken` / `stepWebid`） |
+| GET  | `/operations/get?refresh_channel=all` | 需管理员 | 获取上游用量数据，`refresh_channel` 可选 `vol` / `stepfun` / `zai2` / `antigravity` / `all`       |
+| POST | `/operations/upload`                  | 需管理员 | 更新上游运维凭证（Body 传 `brmToken` / `instanceId` / `stepToken` / `stepWebid` / `zaiApiKey`） |
 
 同样返回统一格式，`data` 为各渠道用量与 token 过期时间明细。
 
