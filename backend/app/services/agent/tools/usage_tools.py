@@ -12,7 +12,7 @@ from app.services.operations_service import _load_ops_config, get_operations
 # _run() 里按模块全局名解析时就会递归调到 handler 自己（少传 args 必然 TypeError）
 from app.utils.token_utils import get_token_expiry as query_token_expiry
 
-VALID_SCOPES = ("vol", "stepfun", "zai", "zai2", "cc", "antigravity", "all")
+VALID_SCOPES = ("vol", "stepfun", "zai2", "antigravity", "all")
 
 
 def _fmt_usage(usage: dict) -> dict:
@@ -32,8 +32,7 @@ async def get_upstream_usage(ctx: ToolContext, args: dict) -> dict:
 
     windows = {}
     for key, label in (("vol_usage", "火山方舟"), ("stepfun_usage", "阶跃星辰"),
-                       ("zai_usage", "智谱账号一"), ("zai2_usage", "智谱账号二"),
-                       ("cc_usage", "CommandCode"), ("antigravity_usage", "Antigravity")):
+                       ("zai2_usage", "智谱"), ("antigravity_usage", "Antigravity")):
         windows[label] = _fmt_usage(data.get(key))
     return {
         "scope": scope,
@@ -77,7 +76,7 @@ async def get_token_expiry(ctx: ToolContext, args: dict) -> dict:
 def register_usage_tools() -> None:
     register(ToolDef(
         name="get_upstream_usage",
-        description="查询上游 TokenPlan 用量（5小时/周/月窗口）：火山方舟/阶跃星辰/智谱×2/CommandCode/Antigravity，scope 可单查或 all。",
+        description="查询上游 TokenPlan 用量（5小时/周/月窗口）：火山方舟/阶跃星辰/智谱/Antigravity，scope 可单查或 all。",
         parameters={"type": "object", "properties": {
             "scope": {"type": "string", "enum": list(VALID_SCOPES),
                       "description": "上游范围，默认 all（antigravity 的 all 读缓存秒回）"},

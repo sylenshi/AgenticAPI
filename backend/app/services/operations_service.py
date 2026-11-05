@@ -5,10 +5,9 @@ import json
 from app.core.config import (
     DATA_DIR,
     antigravity_ops_setting,
-    commandcode_ops_setting,
     zai_ops_setting,
 )
-from app.services.upstream import antigravity, commandcode, stepfun, volcengine, zai
+from app.services.upstream import antigravity, stepfun, volcengine, zai
 from app.utils.token_utils import get_token_expiry
 
 OPS_JSON_PATH = DATA_DIR / "operations_config.json"
@@ -31,29 +30,25 @@ def _save_raw(name: str, data) -> None:
 def get_operations(refresh_channel: str = "all") -> dict:
     """
     获取上游运维数据
-    :param refresh_channel: 刷新的渠道，可选值为 "vol"、"stepfun"、"zai"、"zai2"、"cc"、"antigravity" 或 "all"
+    :param refresh_channel: 刷新的渠道，可选值为 "vol"、"stepfun"、"zai2"、"antigravity" 或 "all"
     """
     re_dict = {
         "status": {},
         "token_expiry": {},
         "vol_usage": {},
         "stepfun_usage": {},
-        "zai_usage": {},
         "zai2_usage": {},
-        "cc_usage": {},
         "antigravity_usage": {},
     }
 
     operation_dict = _load_ops_config()
 
-    # 智谱改用 .env 里的 Coding Plan API key（长期有效），不再走 JSON 里的浏览器 JWT
-    operation_dict["ZAI_API_KEY"] = zai_ops_setting.ZAI_API_KEY
-    operation_dict["ZAI_API_KEY_2"] = zai_ops_setting.ZAI_API_KEY_2
+    # 智谱（v2 套餐）的 API key：控制台"设置凭证"上传的 JSON 值优先，.env 兜底
+    operation_dict["ZAI_API_KEY_2"] = (
+            operation_dict.get("zai_api_key") or zai_ops_setting.ZAI_API_KEY_2
+    )
 
-    # CommandCode 的 API key 同样在 .env（长期有效）
-    operation_dict["commandcode_api_key"] = commandcode_ops_setting.COMMANDCODE_API_KEY
-
-    # Antigravity 的凭证同样在 .env（管理界面访问令牌，长期有效）
+    # Antigravity 的凭证在 .env（管理界面访问令牌，长期有效）
     operation_dict["antigravity_base_url"] = antigravity_ops_setting.ANTIGRAVITY_BASE_URL
     operation_dict["antigravity_api_key"] = antigravity_ops_setting.ANTIGRAVITY_API_KEY
 
@@ -75,15 +70,7 @@ def get_operations(refresh_channel: str = "all") -> dict:
         if result["raw"] is not None:
             _save_raw("stepfun", result["raw"])
 
-    # 【3】智谱 GLM Coding Plan 用量（账号一 · v3，凭证为 .env 的 ZAI_API_KEY）
-    if refresh_channel in ("zai", "all"):
-        result = zai.fetch_zai_usage(operation_dict, token_key="ZAI_API_KEY")
-        re_dict["status"]["zai"] = result["status"]
-        re_dict["zai_usage"] = result["usage"]
-        if result["raw"] is not None:
-            _save_raw("zai", result["raw"])
-
-    # 【4】智谱 GLM Coding Plan 用量（账号二 · v2，凭证为 .env 的 ZAI_API_KEY_2）
+    # 【3】智谱 GLM Coding Plan 用量（v2 套餐，凭证为上传的 zai_api_key 或 .env 兜底）
     if refresh_channel in ("zai2", "all"):
         result = zai.fetch_zai_usage(operation_dict, token_key="ZAI_API_KEY_2")
         re_dict["status"]["zai2"] = result["status"]
@@ -91,15 +78,7 @@ def get_operations(refresh_channel: str = "all") -> dict:
         if result["raw"] is not None:
             _save_raw("zai2", result["raw"])
 
-    # 【5】CommandCode TokenPlan 用量（凭证为 .env 的 COMMANDCODE_API_KEY）
-    if refresh_channel in ("cc", "all"):
-        result = commandcode.fetch_commandcode_usage(operation_dict)
-        re_dict["status"]["cc"] = result["status"]
-        re_dict["cc_usage"] = result["usage"]
-        if result["raw"] is not None:
-            _save_raw("cc", result["raw"])
-
-    # 【6】Antigravity（Gemini PRO）限额（数据源为本机 Antigravity-Manager 容器的管理 API）。
+    # 【4】Antigravity（Gemini PRO）限额（数据源为本机 Antigravity-Manager 容器的管理 API）。
     # 实时限额需容器经 VPN 向 Google 现查（实测约 15s），只在单卡刷新时实时拉取；
     # "all"/页面加载读容器缓存秒回，前端挂载后会自动补一次实时刷新。
     if refresh_channel in ("antigravity", "all"):
@@ -117,10 +96,11 @@ def get_operations(refresh_channel: str = "all") -> dict:
 
 
 def upload_settings(
-    brm_token: str,
-    instance_id: str,
-    step_token: str,
-    step_webid: str,
+        brm_token: str,
+        instance_id: str,
+        step_token: str,
+        step_webid: str,
+        zai_api_key: str,
 ) -> dict:
     """更新上游运维凭证到 operations_config.json"""
     try:
@@ -145,6 +125,9 @@ def upload_settings(
     if len(step_webid) > 5:
         data["stepfun_webid"] = step_webid
         message = message + "stepfun webid已更新；"
+    if len(zai_api_key) > 5:
+        data["zai_api_key"] = zai_api_key
+        message = message + "zai api key已更新；"
 
     # 保存文件
     with open(OPS_JSON_PATH, "w", encoding="utf-8") as f:

@@ -19,24 +19,8 @@ export interface stepfunUsageData {
     monthly: usageWindow
 }
 
-// 智谱渠道的用量数据（仅 5 小时 / 7 天两个窗口，无月度限额）
-export interface zaiUsageData {
-    status: string;
-    fiveHour: usageWindow
-    weekly: usageWindow
-    monthly: usageWindow
-}
-
-// 智谱渠道（账号二，v2 套餐）的用量数据：上游仅返回已用百分比，used/total 为 百分比/100
+// 智谱渠道（v2 套餐）的用量数据：上游仅返回已用百分比，used/total 为 百分比/100
 export interface zai2UsageData {
-    status: string;
-    fiveHour: usageWindow
-    weekly: usageWindow
-    monthly: usageWindow
-}
-
-// CommandCode 渠道的用量数据：月度总额度上游不返回，由后端按 GOAT 套餐 70 写死并换算已用量
-export interface commandcodeUsageData {
     status: string;
     fiveHour: usageWindow
     weekly: usageWindow
@@ -52,11 +36,12 @@ export interface antigravityUsageData {
     monthly: usageWindow
 }
 
-// 数据接口定义，向后端发送cookie等信息
-// 注：智谱凭证已迁移到后端 .env（ZAI_API_KEY / ZAI_API_KEY_2），不再经由前端上传
+// 数据接口定义，向后端发送凭证信息
+// 注：智谱 key 上传后存服务端 operations_config.json，优先于后端 .env 兜底值（方便换号）
 export interface cookieSettings {
     brmToken: string
     instanceId: string
     stepToken: string
     stepWebid: string
+    zaiApiKey: string
 }

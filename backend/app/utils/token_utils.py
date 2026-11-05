@@ -17,8 +17,8 @@ def decode_jwt_payload(token: str) -> dict:
 
 def get_token_expiry(operation_dict: dict) -> dict:
     """
-    获取4个渠道的token/凭证过期时间
-    返回格式：{"volcengine": "...", "stepfun": "...", "zai": "...", "zai2": "..."}
+    获取3个渠道的token/凭证过期时间
+    返回格式：{"volcengine": "...", "stepfun": "...", "zai2": "..."}
     """
     expiry_dict = {}
 
@@ -42,12 +42,7 @@ def get_token_expiry(operation_dict: dict) -> dict:
     except Exception:
         expiry_dict["stepfun"] = None
 
-    # 【3】智谱（ZAI_API_KEY，非 JWT 且长期有效，恒返回 None）
-    zai_payload = decode_jwt_payload(operation_dict.get("ZAI_API_KEY", ""))
-    exp = zai_payload.get("exp")
-    expiry_dict["zai"] = datetime.fromtimestamp(exp).isoformat() if exp else None
-
-    # 【4】智谱账号二（ZAI_API_KEY_2，与【3】同理）
+    # 【3】智谱（ZAI_API_KEY_2，非 JWT 且长期有效，恒返回 None）
     zai2_payload = decode_jwt_payload(operation_dict.get("ZAI_API_KEY_2", ""))
     exp = zai2_payload.get("exp")
     expiry_dict["zai2"] = datetime.fromtimestamp(exp).isoformat() if exp else None

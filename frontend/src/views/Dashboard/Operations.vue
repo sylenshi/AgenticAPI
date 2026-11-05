@@ -61,48 +61,6 @@
         </template>
       </div>
 
-      <!-- Command Code TokenPlan -->
-      <div class="plan-card plan-card-cc">
-        <div class="plan-card-head">
-          <div class="plan-card-title">
-            <span>Command Code</span>
-            <a-tag size="small" color="orange">GOAT订阅</a-tag>
-          </div>
-          <a-button type="text" size="small" @click="refreshCcUsage">
-            <template #icon><icon-sync/></template>
-            刷新
-          </a-button>
-        </div>
-        <a class="plan-link" href="https://commandcode.ai" target="_blank">
-          官方订阅链接<icon-launch/>
-        </a>
-        <div v-if="ccUsage.status !== 'ok'" class="error-text">{{ ccUsage.status }}</div>
-        <template v-else>
-          <plan-usage :usage="ccUsage"/>
-        </template>
-      </div>
-
-      <!-- 智谱 Coding Plan（v3 套餐） -->
-      <div class="plan-card plan-card-zai">
-        <div class="plan-card-head">
-          <div class="plan-card-title">
-            <span>智谱Coding Plan</span>
-            <a-tag size="small" color="blue">v3 Lite</a-tag>
-          </div>
-          <a-button type="text" size="small" @click="refreshZaiUsage">
-            <template #icon><icon-sync/></template>
-            刷新
-          </a-button>
-        </div>
-        <a class="plan-link" href="https://open.bigmodel.cn" target="_blank">
-          官方订阅链接<icon-launch/>
-        </a>
-        <div v-if="zaiUsage.status !== 'ok'" class="error-text">{{ zaiUsage.status }}</div>
-        <template v-else>
-          <plan-usage :usage="zaiUsage"/>
-        </template>
-      </div>
-
       <!-- 智谱 Coding Plan（v2 套餐，上游仅返回百分比） -->
       <div class="plan-card plan-card-zai2">
         <div class="plan-card-head">
@@ -146,6 +104,11 @@
         </template>
       </div>
 
+      <!-- 占位空卡：保持 2×3 网格，后续扩充新渠道时替换 -->
+      <div v-for="n in 2" :key="'empty-' + n" class="plan-card plan-card--empty">
+        <span class="plan-empty-hint">待扩充</span>
+      </div>
+
     </div>
 
     <!-- 设置凭证抽屉（替代原自绘侧边栏） -->
@@ -174,6 +137,16 @@
             <a-input v-model="settings.stepWebid" placeholder="可不填" @change="saveSettings"/>
           </a-form-item>
         </div>
+
+        <a-divider/>
+
+        <!-- 智谱 -->
+        <div class="settings-section">
+          <h4>智谱 Coding Plan</h4>
+          <a-form-item label="API Key">
+            <a-input-password v-model="settings.zaiApiKey" placeholder="粘贴 v2 套餐 API Key（换号后上传即生效，优先于 .env 兜底）" @change="saveSettings"/>
+          </a-form-item>
+        </div>
       </a-form>
 
       <template #footer>
@@ -196,9 +169,7 @@ import type {
   cookieSettings,
   volUsageData,
   stepfunUsageData,
-  zaiUsageData,
   zai2UsageData,
-  commandcodeUsageData,
   antigravityUsageData
 } from '@/types'
 
@@ -271,6 +242,7 @@ const settings = ref<cookieSettings>({
   instanceId: '',
   stepToken: '',
   stepWebid: '',
+  zaiApiKey: '',
 })
 
 /* ═══════════════════════ 下面存储用量数据 ═══════════════════════ */
@@ -304,37 +276,7 @@ const stepUsage = reactive<stepfunUsageData>({
     quota: 0,
   },
 })
-const zaiUsage = reactive<zaiUsageData>({
-  status: "请刷新用量",
-  fiveHour: {
-    used: 0,
-    quota: 0,
-  },
-  weekly: {
-    used: 0,
-    quota: 0,
-  },
-  monthly: {
-    used: 0,
-    quota: 0,
-  },
-})
 const zai2Usage = reactive<zai2UsageData>({
-  status: "请刷新用量",
-  fiveHour: {
-    used: 0,
-    quota: 0,
-  },
-  weekly: {
-    used: 0,
-    quota: 0,
-  },
-  monthly: {
-    used: 0,
-    quota: 0,
-  },
-})
-const ccUsage = reactive<commandcodeUsageData>({
   status: "请刷新用量",
   fiveHour: {
     used: 0,
@@ -397,6 +339,7 @@ const uploadSettings = () => {
     instanceId: settings.value.instanceId,
     stepToken: settings.value.stepToken,
     stepWebid: settings.value.stepWebid,
+    zaiApiKey: settings.value.zaiApiKey,
   }).then(() => {
     Message.success('设置已上传')
   }).catch(err => {
@@ -452,28 +395,6 @@ const refreshStepUsage = () => {
   })
 }
 
-const refreshZaiUsage = () => {
-  getOperations('zai').then(res => {
-    if (res.data.status.zai === "200") {
-      zaiUsage.status = "ok"
-      zaiUsage.fiveHour.used = res.data.zai_usage.zaiFiveHourUsed
-      zaiUsage.weekly.used = res.data.zai_usage.zaiWeeklyUsed
-      zaiUsage.monthly.used = res.data.zai_usage.zaiMonthlyUsed
-      zaiUsage.fiveHour.quota = res.data.zai_usage.zaiFiveHourTotal
-      zaiUsage.weekly.quota = res.data.zai_usage.zaiWeeklyTotal
-      zaiUsage.monthly.quota = res.data.zai_usage.zaiMonthlyTotal
-      zaiUsage.fiveHour.resetAt = res.data.zai_usage.zaiFiveHourResetAt ?? null
-      zaiUsage.weekly.resetAt = res.data.zai_usage.zaiWeeklyResetAt ?? null
-      zaiUsage.monthly.resetAt = res.data.zai_usage.zaiMonthlyResetAt ?? null
-    } else {
-      zaiUsage.status = "数据刷新错误: " + res.data.status.zai
-    }
-  }).catch(err => {
-    console.error(err)
-    zaiUsage.status = getErrorMessage(err, '数据刷新失败')
-  })
-}
-
 const refreshZai2Usage = () => {
   getOperations('zai2').then(res => {
     if (res.data.status.zai2 === "200") {
@@ -493,28 +414,6 @@ const refreshZai2Usage = () => {
   }).catch(err => {
     console.error(err)
     zai2Usage.status = getErrorMessage(err, '数据刷新失败')
-  })
-}
-
-const refreshCcUsage = () => {
-  getOperations('cc').then(res => {
-    if (res.data.status.cc === "200") {
-      ccUsage.status = "ok"
-      ccUsage.fiveHour.used = res.data.cc_usage.ccFiveHourUsed
-      ccUsage.weekly.used = res.data.cc_usage.ccWeeklyUsed
-      ccUsage.fiveHour.quota = res.data.cc_usage.ccFiveHourTotal
-      ccUsage.weekly.quota = res.data.cc_usage.ccWeeklyTotal
-      ccUsage.fiveHour.resetAt = res.data.cc_usage.ccFiveHourResetAt ?? null
-      ccUsage.weekly.resetAt = res.data.cc_usage.ccWeeklyResetAt ?? null
-      ccUsage.monthly.used = res.data.cc_usage.ccMonthlyUsed
-      ccUsage.monthly.quota = res.data.cc_usage.ccMonthlyTotal
-      ccUsage.monthly.resetAt = res.data.cc_usage.ccMonthlyResetAt ?? null
-    } else {
-      ccUsage.status = "数据刷新错误: " + res.data.status.cc
-    }
-  }).catch(err => {
-    console.error(err)
-    ccUsage.status = getErrorMessage(err, '数据刷新失败')
   })
 }
 
@@ -586,21 +485,6 @@ const refreshAllUsage = () => {
     } else {
       stepUsage.status = "数据刷新错误: " + res.data.status.stepfun
     }
-    // zai
-    if (res.data.status.zai === "200") {
-      zaiUsage.status = "ok"
-      zaiUsage.fiveHour.used = res.data.zai_usage.zaiFiveHourUsed
-      zaiUsage.weekly.used = res.data.zai_usage.zaiWeeklyUsed
-      zaiUsage.monthly.used = res.data.zai_usage.zaiMonthlyUsed
-      zaiUsage.fiveHour.quota = res.data.zai_usage.zaiFiveHourTotal
-      zaiUsage.weekly.quota = res.data.zai_usage.zaiWeeklyTotal
-      zaiUsage.monthly.quota = res.data.zai_usage.zaiMonthlyTotal
-      zaiUsage.fiveHour.resetAt = res.data.zai_usage.zaiFiveHourResetAt ?? null
-      zaiUsage.weekly.resetAt = res.data.zai_usage.zaiWeeklyResetAt ?? null
-      zaiUsage.monthly.resetAt = res.data.zai_usage.zaiMonthlyResetAt ?? null
-    } else {
-      zaiUsage.status = "数据刷新错误: " + res.data.status.zai
-    }
     // zai2
     if (res.data.status.zai2 === "200") {
       zai2Usage.status = "ok"
@@ -615,21 +499,6 @@ const refreshAllUsage = () => {
       zai2Usage.monthly.resetAt = res.data.zai2_usage.zaiMonthlyResetAt ?? null
     } else {
       zai2Usage.status = "数据刷新错误: " + res.data.status.zai2
-    }
-    // cc
-    if (res.data.status.cc === "200") {
-      ccUsage.status = "ok"
-      ccUsage.fiveHour.used = res.data.cc_usage.ccFiveHourUsed
-      ccUsage.weekly.used = res.data.cc_usage.ccWeeklyUsed
-      ccUsage.fiveHour.quota = res.data.cc_usage.ccFiveHourTotal
-      ccUsage.weekly.quota = res.data.cc_usage.ccWeeklyTotal
-      ccUsage.fiveHour.resetAt = res.data.cc_usage.ccFiveHourResetAt ?? null
-      ccUsage.weekly.resetAt = res.data.cc_usage.ccWeeklyResetAt ?? null
-      ccUsage.monthly.used = res.data.cc_usage.ccMonthlyUsed
-      ccUsage.monthly.quota = res.data.cc_usage.ccMonthlyTotal
-      ccUsage.monthly.resetAt = res.data.cc_usage.ccMonthlyResetAt ?? null
-    } else {
-      ccUsage.status = "数据刷新错误: " + res.data.status.cc
     }
     // antigravity
     if (res.data.status.antigravity === "200") {
@@ -704,13 +573,25 @@ onMounted(() => {
   box-shadow: var(--shadow-md);
 }
 
-/* 各渠道强调色：火山主蓝 / 阶跃紫 / 智谱 v3 青 / 智谱 v2 金 / CommandCode 橘红 / Antigravity 绿 */
+/* 各渠道强调色：火山主蓝 / 阶跃紫 / 智谱 v2 金 / Antigravity 绿 */
 .plan-card-vol { --plan-accent: var(--color-primary); }
 .plan-card-step { --plan-accent: var(--color-violet); }
-.plan-card-zai { --plan-accent: var(--color-cyan); }
 .plan-card-zai2 { --plan-accent: var(--color-gold); }
-.plan-card-cc { --plan-accent: var(--color-vermilion); }
 .plan-card-ag { --plan-accent: var(--color-success); }
+
+/* 占位空卡：四周虚线示意预留位，左侧品牌色脊线与其他卡保持一致（实线） */
+.plan-card--empty {
+  border-style: dashed;
+  border-left-style: solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plan-empty-hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
 
 .plan-card-head {
   display: flex;

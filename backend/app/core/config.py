@@ -77,7 +77,8 @@ class AgentSettings(BaseSettings):
 class ZaiOpsSettings(BaseSettings):
     """智谱 Coding Plan 用量监控专用配置
 
-    API key 长期有效，替代原浏览器 Authorization JWT（登录态会过期，需定期重抓）。
+    API key 长期有效。控制台"运营-设置凭证"上传的 key 存 operations_config.json，
+    优先于此处的 .env 兜底值（换号只上传、无需改文件）。
     """
 
     model_config = SettingsConfigDict(
@@ -86,26 +87,8 @@ class ZaiOpsSettings(BaseSettings):
         extra='ignore', # 忽略 .env 中未定义的变量
     )
 
-    # 账号一（v3 套餐）的 Coding Plan API key
-    ZAI_API_KEY: str = ""
-    # 账号二（v2 套餐）的 Coding Plan API key
+    # v2 套餐账号的 Coding Plan API key（.env 兜底值）
     ZAI_API_KEY_2: str = ""
-
-
-class CommandCodeOpsSettings(BaseSettings):
-    """CommandCode TokenPlan 用量监控专用配置
-
-    API key 长期有效，经 x-api-key 头鉴权（Authorization: Bearer 会被上游拒绝）。
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=str(ENV_FILE_PATH),
-        env_file_encoding='utf-8',
-        extra='ignore', # 忽略 .env 中未定义的变量
-    )
-
-    # CommandCode 的 TokenPlan API key
-    COMMANDCODE_API_KEY: str = ""
 
 
 class AntigravityOpsSettings(BaseSettings):
@@ -165,6 +148,5 @@ agent_setting = AgentSettings()
 setting = MysqlSettings()
 server_setting = ServerSettings()
 zai_ops_setting = ZaiOpsSettings()
-commandcode_ops_setting = CommandCodeOpsSettings()
 antigravity_ops_setting = AntigravityOpsSettings()
 sandbox_setting = SandboxSettings()

@@ -5,9 +5,7 @@ export type { userInfoSchema, userAuthSchema } from './user'
 export type {
     volUsageData,
     stepfunUsageData,
-    zaiUsageData,
     zai2UsageData,
-    commandcodeUsageData,
     antigravityUsageData,
     cookieSettings,
 } from './operations'
