@@ -31,6 +31,6 @@ export const dashItems: dashItem[] = [
     {id: 4, name: '运营', to: '/dashboard/operations', icon: 'icon-computer'},
     {id: 5, name: '用户', to: '/dashboard/userlist', icon: 'icon-user-group'},
     {id: 6, name: '兑换', to: '/dashboard/redemptioncodes', icon: 'icon-gift'},
-    {id: 7, name: '安全', to: '/dashboard/security', icon: 'icon-settings'},
+    {id: 7, name: '设置', to: '/dashboard/settings', icon: 'icon-settings'},
     {id: 8, name: 'Agent', to: '/dashboard/agent', icon: 'icon-robot'},
 ]

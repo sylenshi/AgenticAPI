@@ -1,8 +1,10 @@
-"""监控面板接口（监控页使用，需登录；阈值设置需管理员）
+"""监控面板接口（监控页使用，需登录）
 
 - 对话数据：全站累计 token、对话记录分页（管理员可看全部用户）
 - 调用日志：logs 表分页筛选（管理员看全部，普通用户只看自己）
 - 数据看板：当前用户时间范围内的用量累计与分桶序列（走预聚合表，无全量求和）
+
+对话记录长度阈值已迁移至控制台-设置页（GET/PUT /admin/settings），本路由不再提供
 """
 
 from datetime import datetime
@@ -12,10 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud import chat_record as chat_crud
 from app.crud import log as log_crud
-from app.crud import system_config as config_crud
 from app.crud import usage_stats as stats_crud
 from app.router.deps import get_db
-from app.schemas.monitor import ThresholdUpdateSchema
 from app.utils.auth import get_current_admin, get_current_user
 from app.utils.response import success_response
 
@@ -189,26 +189,3 @@ async def get_user_stats(
         ],
     }
     return success_response(message="获取用量统计成功", data=data)
-
-
-@router.get("/threshold")
-async def get_threshold(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
-    """读取对话记录长度阈值（输入+输出 token 上限）"""
-    value = await config_crud.get_chat_record_threshold(db)
-    return success_response(message="获取阈值成功", data={"value": value})
-
-
-@router.put("/threshold")
-async def update_threshold(
-        body: ThresholdUpdateSchema,
-        db: AsyncSession = Depends(get_db),
-        admin=Depends(get_current_admin),
-):
-    """更新对话记录长度阈值，立即生效"""
-    await config_crud.set_value(db, config_crud.CHAT_RECORD_MAX_TOKENS_KEY, str(body.value))
-    await log_crud.write_log(
-        db, type="admin", action="update_chat_record_threshold",
-        user_id=admin.id, username=admin.username,
-        detail=f"将对话记录长度阈值调整为 {body.value} token",
-    )
-    return success_response(message="阈值更新成功", data={"value": body.value})

@@ -29,13 +29,3 @@ export function getMonitorLogs(params: {
 export function getUserStats(params: { start: string; end: string; granularity: string }) {
     return request.get<userStatsSchema>('/monitor/stats', { params })
 }
-
-/** 读取对话记录长度阈值（管理员） */
-export function getThreshold() {
-    return request.get<{ value: number }>('/monitor/threshold')
-}
-
-/** 更新对话记录长度阈值（管理员），立即生效 */
-export function updateThreshold(value: number) {
-    return request.put<{ value: number }>('/monitor/threshold', { value })
-}

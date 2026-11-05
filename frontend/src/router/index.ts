@@ -16,7 +16,7 @@ import Channels from '@/views/Dashboard/Channels.vue'
 import UserList from '@/views/Dashboard/UserList.vue'
 import RedemptionCodes from '@/views/Dashboard/RedemptionCodes.vue'
 import Operations from '@/views/Dashboard/Operations.vue'
-import Security from '@/views/Dashboard/Security.vue'
+import Settings from '@/views/Dashboard/Settings.vue'
 import AgentChat from '@/views/Dashboard/AgentChat.vue'
 
 const router = createRouter({
@@ -113,9 +113,16 @@ const router = createRouter({
                     meta: { requiresAdmin: true }
                 },
                 {
-                    name: 'Security',
+                    name: 'Settings',
+                    path: 'settings',
+                    component: Settings,
+                    // 站点设置（监控阈值/Agent默认模型/注册初始金额），仅管理员
+                    meta: { requiresAdmin: true }
+                },
+                // 旧"安全"占位页路径保留跳转兼容
+                {
                     path: 'security',
-                    component: Security
+                    redirect: '/dashboard/settings'
                 }
             ]
         },

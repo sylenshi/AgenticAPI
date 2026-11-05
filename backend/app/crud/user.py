@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud import api_key as api_key_crud
+from app.crud import system_config as config_crud
 from app.models import UserTokenTabel
 from app.models.api_key import ApiKeyTable
 from app.models.user import UserTabel
@@ -32,10 +33,12 @@ async def create_user(db: AsyncSession, user_data: UserLoginSchema) -> UserTabel
     # 先密码加密
     hashed_password = hash_password(user_data.password)
     # 再创建用户（正式注册统一进 vip 分组，可调用全部分组模型；访客走 create_guest_user 进 free）
+    # 初始余额读站点设置（system_config.register_initial_balance，默认 0），只对新注册生效
     user = UserTabel(
         username=user_data.username,
         password=hashed_password,
         user_group="vip",
+        balance=await config_crud.get_initial_balance(db, config_crud.REGISTER_INITIAL_BALANCE_KEY),
     )
     db.add(user)  # 这里不使用await，因为add方法是同步的
     await db.commit()
@@ -141,12 +144,14 @@ async def create_guest_user(db: AsyncSession) -> UserTabel:
     创建临时访客账号
     """
     suffix = uuid.uuid4().hex[:8]  # 随机后缀，保证用户名不重复
+    # 初始余额读站点设置（system_config.guest_initial_balance，默认 0，与正式注册独立配置）
     user = UserTabel(
         username=f"guest_{suffix}",
         password=hash_password(secrets.token_urlsafe(16)),
         nickname=f"访客{suffix[:4]}",  # 导航栏展示用，比guest_xxxx友好
         is_guest=True,
         user_group="free",  # 访客显式固定 free 分组（仅免费模型），与正式注册的 vip 区分
+        balance=await config_crud.get_initial_balance(db, config_crud.GUEST_INITIAL_BALANCE_KEY),
     )
     db.add(user)
     await db.commit()

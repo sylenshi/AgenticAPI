@@ -29,13 +29,13 @@ from app.utils.response import success_response
 
 router = APIRouter(prefix="/maintain-agent", tags=["MaintainAgent"])
 
-# 默认大脑模型解析链的配置键与内置兜底（链：system_config → .env → 站内首个启用模型）
-AGENT_DEFAULT_MODEL_KEY = "agent_default_model"
+# 默认大脑模型解析链（system_config.agent_default_model → .env AGENT_MAINTENANCE_MODEL → 站内首个启用模型）
+# 配置键 AGENT_DEFAULT_MODEL_KEY 统一登记在 config_crud（设置页 GET/PUT /admin/settings 共用）
 
 
 async def _resolve_default_model(db: AsyncSession) -> str:
     """解析会话默认驱动模型：system_config.agent_default_model → .env AGENT_MAINTENANCE_MODEL → 首个启用模型"""
-    configured = await config_crud.get_value(db, AGENT_DEFAULT_MODEL_KEY)
+    configured = await config_crud.get_value(db, config_crud.AGENT_DEFAULT_MODEL_KEY)
     for candidate in (configured, agent_setting.AGENT_MAINTENANCE_MODEL):
         if candidate and candidate.strip():
             model = await model_crud.get_by_name(db, candidate.strip())

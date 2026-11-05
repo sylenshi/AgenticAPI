@@ -20,17 +20,6 @@
 
           </div>
 
-          <!-- 管理员：对话记录长度阈值设置 -->
-          <div v-if="userStore.isAdmin" class="page-card threshold-card">
-            <div class="threshold-row">
-              <span class="threshold-text">记录阈值：仅当输入+输出 token 合计不超过</span>
-              <a-input-number v-model="threshold" :min="100" :max="1000000" :step="500" mode="button"
-                              :style="{width: '140px'}"/>
-              <span class="threshold-text">时，才记录对话内容（当前对所有开启日志的模型生效）</span>
-              <a-button type="primary" :loading="thresholdSaving" @click="saveThreshold">保存</a-button>
-            </div>
-          </div>
-
           <!-- 对话记录筛选栏 -->
           <div class="filter-bar">
             <a-space>
@@ -233,7 +222,7 @@ import type {TableColumnData} from '@arco-design/web-vue'
 import LineChart from '@/components/monitor/LineChart.vue'
 import {getErrorMessage} from '@/api/request'
 import {
-  getChatRecords, getMonitorLogs, getSiteSummary, getThreshold, getUserStats, updateThreshold,
+  getChatRecords, getMonitorLogs, getSiteSummary, getUserStats,
 } from '@/api/monitor'
 import {useUserStore} from '@/stores/user'
 import type {chatRecordSchema, lineSeriesSchema, logItemSchema, siteSummarySchema, userStatsSchema} from '@/types'
@@ -254,7 +243,6 @@ function loadTab(name: string) {
   if (name === 'chats') {
     loadSummary()
     loadChats()
-    if (userStore.isAdmin) loadThreshold()
   } else if (name === 'logs') {
     loadLogs()
   } else if (name === 'stats') {
@@ -322,31 +310,6 @@ async function loadSummary() {
     siteSummary.value = res.data
   } catch (err) {
     Message.error(getErrorMessage(err, '获取全站用量失败'))
-  }
-}
-
-// ── 阈值设置（管理员） ──
-const threshold = ref(5000)
-const thresholdSaving = ref(false)
-
-async function loadThreshold() {
-  try {
-    const res = await getThreshold()
-    threshold.value = res.data.value
-  } catch (err) {
-    Message.error(getErrorMessage(err, '获取阈值失败'))
-  }
-}
-
-async function saveThreshold() {
-  thresholdSaving.value = true
-  try {
-    await updateThreshold(threshold.value)
-    Message.success('阈值已更新，立即生效')
-  } catch (err) {
-    Message.error(getErrorMessage(err, '阈值更新失败'))
-  } finally {
-    thresholdSaving.value = false
   }
 }
 
@@ -574,23 +537,6 @@ watch([statsTimeRange, granularity], loadStats)
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4) var(--space-5);
-}
-
-/* ── 阈值设置卡片 ── */
-.threshold-card {
-  margin-bottom: var(--space-1);
-}
-
-.threshold-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.threshold-text {
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
 }
 
 .model-filter-label {

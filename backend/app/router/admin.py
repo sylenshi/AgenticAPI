@@ -1,11 +1,14 @@
-"""管理员用户管理接口（控制台-用户页面使用，需管理员权限）"""
+"""管理员用户管理接口（控制台-用户页面使用，需管理员权限）+ 站点设置接口（控制台-设置页）"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud import log as log_crud
+from app.crud import model as model_crud
+from app.crud import system_config as config_crud
 from app.crud import user as user_crud
 from app.router.deps import get_db
-from app.schemas.admin import ALLOWED_GROUPS, AdminUserBatchDeleteSchema, AdminUserUpdateSchema
+from app.router.maintain_agent import _resolve_default_model as resolve_default_model
+from app.schemas.admin import ALLOWED_GROUPS, AdminUserBatchDeleteSchema, AdminUserUpdateSchema, SettingsUpdateSchema
 from app.utils.auth import get_current_admin
 from app.utils.response import success_response
 
@@ -103,3 +106,66 @@ async def delete_users(
         detail=f"批量删除了 {deleted} 个用户（ids={ids}）",
     )
     return success_response(message=f"已删除 {deleted} 个用户", data={"deleted": deleted})
+
+
+@router.get("/settings")
+async def get_settings(
+        db: AsyncSession = Depends(get_db),
+        admin=Depends(get_current_admin),
+):
+    """读取站点设置当前值（Agent 默认模型附带当前实际生效值，阈值/金额带默认兜底）"""
+    agent_configured = await config_crud.get_value(db, config_crud.AGENT_DEFAULT_MODEL_KEY) or ""
+    try:
+        agent_effective = await resolve_default_model(db)
+    except HTTPException:
+        agent_effective = ""  # 站内暂无启用模型时无生效值，设置页仍可打开
+    data = {
+        "chatRecordMaxTokens": await config_crud.get_chat_record_threshold(db),
+        "agentDefaultModel": agent_configured,
+        "agentEffectiveModel": agent_effective,
+        "registerInitialBalance": float(await config_crud.get_initial_balance(db, config_crud.REGISTER_INITIAL_BALANCE_KEY)),
+        "guestInitialBalance": float(await config_crud.get_initial_balance(db, config_crud.GUEST_INITIAL_BALANCE_KEY)),
+    }
+    return success_response(message="获取设置成功", data=data)
+
+
+@router.put("/settings")
+async def update_settings(
+        body: SettingsUpdateSchema,
+        db: AsyncSession = Depends(get_db),
+        admin=Depends(get_current_admin),
+):
+    """更新站点设置（部分更新语义，仅传入字段生效；先全部校验再写入，写审计日志）"""
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="未提供任何需要更新的字段")
+
+    # 先校验后写入：模型名必须存在且启用（空串 = 清除指定、恢复默认解析链，放行）
+    model_name = updates.get("agent_default_model")
+    if model_name is not None and model_name.strip():
+        name = model_name.strip()
+        model = await model_crud.get_by_name(db, name)
+        if not model or not model.get("status"):
+            raise HTTPException(status_code=400, detail=f"模型 {name} 不存在或未启用")
+
+    detail_parts = []
+    if "chat_record_max_tokens" in updates:
+        await config_crud.set_value(db, config_crud.CHAT_RECORD_MAX_TOKENS_KEY, str(updates["chat_record_max_tokens"]))
+        detail_parts.append(f"记录阈值={updates['chat_record_max_tokens']} token")
+    if model_name is not None:
+        name = model_name.strip()
+        await config_crud.set_value(db, config_crud.AGENT_DEFAULT_MODEL_KEY, name)
+        detail_parts.append(f"Agent默认模型={name or '(恢复默认链)'}")
+    for field, key, label in (
+        ("register_initial_balance", config_crud.REGISTER_INITIAL_BALANCE_KEY, "注册初始余额"),
+        ("guest_initial_balance", config_crud.GUEST_INITIAL_BALANCE_KEY, "访客初始余额"),
+    ):
+        if field in updates:
+            await config_crud.set_value(db, key, str(updates[field]))
+            detail_parts.append(f"{label}={updates[field]}")
+
+    await log_crud.write_log(
+        db, type="admin", action="update_settings", user_id=admin.id, username=admin.username,
+        detail=f"更新站点设置：{'、'.join(detail_parts)}",
+    )
+    return success_response(message="设置已更新")
