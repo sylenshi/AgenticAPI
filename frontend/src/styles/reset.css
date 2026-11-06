@@ -135,8 +135,10 @@ table {
   width: 100%;
 }
 
-/* 聚焦可见性 — 无障碍 */
-:focus-visible {
+/* 聚焦可见性 — 无障碍
+   Arco 组件与原生表单控件自带 focus 态（主色边框），不再叠加 outline，
+   否则输入框点击会出现多层蓝框。仅对其它可聚焦元素保留键盘焦点环。 */
+:focus-visible:not([class*='arco-']):not(input):not(textarea):not(select) {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }

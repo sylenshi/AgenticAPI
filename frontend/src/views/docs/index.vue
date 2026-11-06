@@ -74,6 +74,14 @@ import MarkdownIt from 'markdown-it'
 import {ref, onMounted, onBeforeUnmount, nextTick} from 'vue'
 
 const md = new MarkdownIt()
+
+// 给 markdown 表格包一层可横向滚动的容器：窄屏宽表格只在自己内部滚动，
+// 不把整个内容列撑出横向滚动条；桌面宽度下容器不做任何视觉改动。
+md.renderer.rules.table_open = (tokens, idx, options, _env, self) =>
+    '<div class="table-scroll">' + self.renderToken(tokens, idx, options)
+md.renderer.rules.table_close = (tokens, idx, options, _env, self) =>
+    self.renderToken(tokens, idx, options) + '</div>'
+
 const renderedContent = ref('')
 const activePath = ref('')
 const loading = ref(false)
@@ -188,8 +196,16 @@ onMounted(() => {
 
 <style scoped>
 .docs-page {
-  display: flex;
-  height: 100vh;
+  /* 正文留白与代码块出血共用同一个变量，避免不同断点下二者对不齐 */
+  --docs-gutter: clamp(24px, 4vw, 56px);
+
+  display: grid;
+  /* 左右定宽、中间弹性；minmax(0, 1fr) 防止长代码 / 宽表格把中间列撑开 */
+  grid-template-columns: 200px minmax(0, 1fr) 220px;
+  /* 外层 .app-main 是 calc(100vh - 56px) 且 overflow:hidden，
+     这里再用 100vh 会高出一条 header、底部被裁掉，故改为 100% */
+  height: 100%;
+  min-height: 0;
   background-color: var(--color-bg);
 }
 
@@ -298,15 +314,20 @@ onMounted(() => {
    ═══════════════════════════════════════════════════════════ */
 
 .docs-content {
-  flex: 1;
+  min-width: 0;
+  min-height: 0;
   background-color: var(--color-white);
   overflow-y: auto;
 }
 
 .content-wrapper {
-  max-width: var(--container-lg);
+  width: 100%;
+  /* 原来 max-width 取 --container-lg（1024px），在 1385px 视口下比中间列还宽，
+     margin:0 auto 计算为 0，居中完全没生效。
+     换成更高的阅读上限 + 真正居中：窄屏铺满中间列，超宽屏行长也不失控 */
+  max-width: 1180px;
   margin: 0 auto;
-  padding: var(--space-10) var(--space-12);
+  padding: var(--space-10) var(--docs-gutter);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -364,6 +385,10 @@ onMounted(() => {
    ═══════════════════════════════════════════════════════════ */
 
 .prose {
+  /* 覆盖全局 typography.css 的 .prose { max-width: 65ch }：
+     那条约 640px 的固定阅读宽度把正文钉死并左对齐，是内容偏窄、偏左的主因 */
+  max-width: none;
+  width: 100%;
   color: var(--color-text);
   line-height: var(--leading-relaxed);
 }
@@ -481,10 +506,19 @@ onMounted(() => {
   margin: var(--space-6) 0;
 }
 
-.prose :deep(table) {
+.prose :deep(.table-scroll) {
   width: 100%;
-  border-collapse: collapse;
   margin: var(--space-6) 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.prose :deep(.table-scroll table) {
+  width: 100%;
+  /* 窄屏时列宽不低于此值，超出的部分由 .table-scroll 横向滚动 */
+  min-width: 480px;
+  border-collapse: collapse;
+  margin: 0;
   font-size: var(--text-sm);
 }
 
@@ -510,7 +544,11 @@ onMounted(() => {
 }
 
 .prose :deep(pre) {
+  /* 代码块与正文同宽、左右边缘对齐正文，不做两侧出血；
+     长行仍在本容器内横向滚动，不会撑开中间列 */
   margin: var(--space-6) 0;
+  width: 100%;
+  max-width: 100%;
   padding: var(--space-4) var(--space-6);
   background-color: var(--color-gray-900);
   color: #e5e7eb;
@@ -532,14 +570,24 @@ onMounted(() => {
    ═══════════════════════════════════════════════════════════ */
 
 @media (max-width: 1024px) {
+  /* 只改 gutter，正文 padding 与代码块出血会一起跟着变 */
+  .docs-page {
+    --docs-gutter: clamp(20px, 3vw, 32px);
+  }
+
   .content-wrapper {
-    padding: var(--space-8) var(--space-6);
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-8);
   }
 }
 
 @media (max-width: 768px) {
   .docs-page {
+    /* grid 下 flex-direction 无效，窄屏必须显式改回纵向 flex */
+    display: flex;
     flex-direction: column;
+    height: 100%;
+    --docs-gutter: var(--space-4);
   }
 
   .docs-sidebar {
@@ -548,8 +596,14 @@ onMounted(() => {
     border-bottom: 1px solid var(--color-border);
   }
 
+  .docs-content {
+    flex: 1;
+    min-height: 0;
+  }
+
   .content-wrapper {
-    padding: var(--space-6) var(--space-4);
+    padding-top: var(--space-6);
+    padding-bottom: var(--space-6);
   }
 
   /* 窄屏隐藏目录 */

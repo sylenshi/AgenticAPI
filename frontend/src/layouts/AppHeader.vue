@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
+// 顶栏小尺寸主标：由 src/assets/brand/logosmall.png 生成（首屏节点用 logo.png）
 import logoImage from '@/assets/images/logo-icon.png'
 import { navItems } from '@/constants/nav'
 import { useUserStore } from '@/stores/user'

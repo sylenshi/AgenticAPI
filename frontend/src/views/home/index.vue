@@ -12,8 +12,8 @@
       </div>
       <div class="slide-inner hero-inner">
         <!-- ═══ 首屏动态标识：三路光带汇聚 → 玻璃节点（定稿主标）→ 三路发散 ═══
-             摘取自 docs/assets/参考的首页组件.html 的 living mark 部分：
-             流光 SVG + 玻璃节点 + 鼠标视差；远程定稿图换成本地 logo1（logo-mark.png）。 -->
+             参考首页组件的 living mark 部分（流光 SVG + 玻璃节点 + 鼠标视差）；
+             节点内主标取自 src/assets/brand/logo.png；顶栏 / favicon 用 logosmall.png。 -->
         <div class="hero-mark" aria-hidden="true">
           <div class="mark-flow-wrap">
             <svg class="mark-flow" viewBox="0 0 1240 440" preserveAspectRatio="xMidYMid meet">
@@ -60,9 +60,7 @@
               </div>
             </div>
           </div>
-          <div class="mark-labels"><span>IN</span><span>ROUTE</span><span>OUT</span></div>
         </div>
-        <p class="slide-eyebrow">AGENTIC API · 大模型中转站</p>
         <h1 class="hero-title">由 Agent 自主运营维护的<br/><span class="hero-title-key">新一代智能 API 中转站</span>
         </h1>
         <p class="hero-desc">
@@ -73,25 +71,6 @@
           <a-button @click="handleStart">立即开始使用</a-button>
         </div>
 
-        <!-- 数据速览：等宽数字 + 分隔线，贴近控制台质感 -->
-        <div class="hero-metrics">
-          <div class="hero-metric">
-            <span class="hero-metric-value">{{ modelListStore.totalModelNumber }}</span>
-            <span class="hero-metric-label">可用模型</span>
-          </div>
-          <div class="hero-metric">
-            <span class="hero-metric-value">{{ modelListStore.freeModelNumber }}</span>
-            <span class="hero-metric-label">免费模型</span>
-          </div>
-          <div class="hero-metric">
-            <span class="hero-metric-value">100%</span>
-            <span class="hero-metric-label">OpenAI 兼容</span>
-          </div>
-          <div class="hero-metric">
-            <span class="hero-metric-value">7 × 24</span>
-            <span class="hero-metric-label">多渠道容灾</span>
-          </div>
-        </div>
       </div>
       <div class="scroll-hint" @click="scrollToPage(1)">
         <icon-down/>
@@ -781,49 +760,14 @@ onUnmounted(() => {
   margin-bottom: var(--space-8);
 }
 
+/* 屏1 删去数据速览后，去掉按钮下方多余留白，让首屏内容更居中 */
+.slide-hero .hero-actions {
+  margin-bottom: 0;
+}
+
 /* 主按钮：品牌色外发光（借鉴 Nexus CTA） */
 .hero-actions :deep(.arco-btn-primary) {
   box-shadow: 0 6px 22px rgba(22, 93, 255, 0.35);
-}
-
-/* 数据速览：半透明面板浮于光效之上，等宽数字。
-   不用 backdrop-filter —— 滚动时它每帧重滤背后内容，开销大；
-   提高底色不透明度在淡色静态背景上观感几乎一致 */
-.hero-metrics {
-  position: relative;
-  display: inline-flex;
-  align-items: stretch;
-  gap: var(--space-8);
-  padding: var(--space-4) var(--space-8);
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(22, 93, 255, 0.14);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-md);
-}
-
-.hero-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 72px;
-}
-
-.hero-metric + .hero-metric {
-  border-left: 1px solid var(--color-border);
-  padding-left: var(--space-8);
-}
-
-.hero-metric-value {
-  font-family: var(--font-mono);
-  font-size: var(--text-xl);
-  font-weight: var(--font-semibold);
-  color: var(--color-text);
-  font-variant-numeric: tabular-nums;
-}
-
-.hero-metric-label {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
 }
 
 /* 向下滚动提示 */
@@ -1410,17 +1354,6 @@ onUnmounted(() => {
     font-size: var(--text-3xl);
   }
 
-  .hero-metrics {
-    flex-wrap: wrap;
-    gap: var(--space-4);
-    padding: 0;
-  }
-
-  .hero-metric + .hero-metric {
-    border-left: none;
-    padding-left: 0;
-  }
-
   .split,
   .split-reverse {
     grid-template-columns: 1fr;
@@ -1440,10 +1373,12 @@ onUnmounted(() => {
   }
 }
 
-/* ═══════════ 首屏动态标识（摘取自 docs/assets/参考的首页组件.html） ═══════════ */
+/* ═══════════ 首屏动态标识（参考 living mark，源图见 src/assets/brand） ═══════════ */
 .hero-mark {
-  width: min(100%, 760px);
-  margin: 0 auto var(--space-5);
+  /* 组件整体放大：宽度、流光高度、节点尺寸一起调，节点尺寸抽成变量便于断点覆盖 */
+  --mark-node-size: clamp(112px, 13.5vw, 178px);
+  width: min(100%, 860px);
+  margin: 0 auto var(--space-6);
   pointer-events: none;
 }
 
@@ -1451,7 +1386,7 @@ onUnmounted(() => {
   position: relative;
   width: 100%;
   aspect-ratio: 1240 / 440;
-  max-height: clamp(150px, 23vh, 240px);
+  max-height: clamp(180px, 29vh, 300px);
 }
 
 .mark-flow {
@@ -1514,7 +1449,7 @@ onUnmounted(() => {
   100% { stroke-dashoffset: -400; }
 }
 
-/* 中央玻璃节点：内嵌 logo1 定稿主标，替代参考稿里的远程图片 */
+/* 中央玻璃节点：内嵌 src/assets/brand/logo.png 定稿主标（512px 优化版 logo-mark.png） */
 .mark-node-parallax {
   position: absolute;
   left: 50%; top: 50%;
@@ -1525,9 +1460,9 @@ onUnmounted(() => {
   transition: transform .16s ease-out;
 }
 .mark-node {
-  width: clamp(96px, 12vw, 148px);
-  height: clamp(96px, 12vw, 148px);
-  border-radius: clamp(22px, 2.6vw, 34px);
+  width: var(--mark-node-size);
+  height: var(--mark-node-size);
+  border-radius: calc(var(--mark-node-size) * .23);
   display: flex; align-items: center; justify-content: center;
   background: rgba(255, 255, 255, .6);
   border: 1px solid rgba(255, 255, 255, .92);
@@ -1540,7 +1475,7 @@ onUnmounted(() => {
 }
 .mark-node-logo {
   position: relative; z-index: 1;
-  width: 82%; height: 82%; object-fit: contain;
+  width: 84%; height: 84%; object-fit: contain;
 }
 .mark-sheen {
   position: absolute; inset: -32%; border-radius: 50%; pointer-events: none;
@@ -1558,23 +1493,12 @@ onUnmounted(() => {
   82% { transform: scale(1) translateY(0); }
 }
 
-.mark-labels {
-  display: flex; justify-content: space-between;
-  width: min(100%, 640px);
-  margin: -4px auto 0;
-  font-family: var(--font-mono);
-  font-size: 10px; font-weight: 500; letter-spacing: .34em;
-  color: var(--color-text-muted); opacity: .72;
-}
-.mark-labels span::before {
-  content: ''; display: inline-block; width: 14px; height: 1px;
-  margin-right: 9px; vertical-align: middle;
-  background: linear-gradient(90deg, #7FA9EC, #A9A4E9);
-}
-
 @media (max-width: 768px) {
-  .hero-mark { margin-bottom: var(--space-3); }
-  .mark-labels { display: none; }
+  .hero-mark {
+    --mark-node-size: clamp(96px, 26vw, 132px);
+    margin-bottom: var(--space-3);
+  }
+  .mark-flow-wrap { max-height: clamp(140px, 24vh, 200px); }
   .rb-halo { stroke-width: 18; }
   .rb-beam { stroke-width: 8; }
   .rb-head { stroke-width: 6; }

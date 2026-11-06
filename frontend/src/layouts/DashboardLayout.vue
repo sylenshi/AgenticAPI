@@ -131,6 +131,17 @@ const visibleDashItems = computed(() => {
   min-width: 0;
   overflow-y: auto;
   background-color: var(--color-bg-layout);
+  /* ── MiSans VF 字重刻度修正（仅作用于控制台内容区） ──
+     VF 的 CSS 用字体内部 wght 刻度（150-700），写 400 实际渲染 ≈ 标准 550-600，
+     看起来偏粗。这里按包内 README 的映射把字重令牌改回标准刻度对应的内部值：
+     标准 300/400/500/600/700 → 内部 250/330/380/450/630。
+     只在 .dashboard-main 作用域重定义，顶栏与首页的字体完全不受影响。 */
+  --font-light: 250;
+  --font-normal: 330;
+  --font-medium: 380;
+  --font-semibold: 450;
+  --font-bold: 630;
+  font-weight: var(--font-normal);
 }
 
 /* 内容列：全站统一 1280px 封顶 + 居中，覆盖所有控制台子页 */

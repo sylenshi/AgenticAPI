@@ -32,21 +32,9 @@ body,
   font-family: var(--font-sans);
 }
 
-/* ── 1. 聚焦态：输入类组件统一柔光焦点环 ───────────────────────────────── */
-.arco-input-wrapper.arco-input-focus,
-.arco-textarea-wrapper.arco-textarea-focus,
-.arco-select-view-single.arco-select-view-focus,
-.arco-select-view-multiple.arco-select-view-focus,
-.arco-picker-focused {
-  box-shadow: 0 0 0 3px var(--color-focus-ring);
-}
-
-.arco-form-item-status-error .arco-input-wrapper.arco-input-focus,
-.arco-form-item-status-error .arco-textarea-wrapper.arco-textarea-focus,
-.arco-form-item-status-error .arco-select-view-single.arco-select-view-focus,
-.arco-form-item-status-error .arco-select-view-multiple.arco-select-view-focus {
-  box-shadow: 0 0 0 3px var(--color-focus-ring-error);
-}
+/* ── 1. 聚焦态：沿用 Arco 自身的主色边框，不叠加额外光环 ─────────────────
+   此前叠了 3px 柔光环 + 全局 outline + .filter-bar outline，输入框点击会
+   出现三层蓝框，已全部移除；Arco 控件自己的 focus 态已足够清晰。 */
 
 /* ── 2. 表格：紧凑重做（核心） ───────────────────────────────────────────
    目标：行高 ≈ 28px（原 padding 9px×2 + 默认行高 ≈ 38px），
@@ -144,10 +132,6 @@ body,
 
 .arco-btn:not(.arco-btn-loading):not(.arco-btn-disabled):active {
   transform: translateY(1px);
-}
-
-.arco-btn:focus-visible {
-  box-shadow: 0 0 0 3px var(--color-focus-ring);
 }
 
 .arco-btn-primary {

@@ -733,23 +733,15 @@
   box-shadow: var(--shadow-card);
 }
 
-/* ── 共享容器统一交互态（2026-11 新增） ──
-   静止几乎无阴影（边框负责分隔），悬停最多 shadow-sm；焦点环与 Arco 控件同语言。 */
-.page-card,
-.stat-card,
-.filter-bar {
+/* ── 共享容器统一交互态（2026-11 新增，统计卡不参与） ──
+   静止几乎无阴影（边框负责分隔），悬停最多 shadow-sm。
+   .stat-card 的彩色左脊线由 border-left 单独着色：若加 hover 的 border-color
+   会把脊线一起染灰，过渡动画也会让卡片"会动"，按产品要求统计卡保持静态。 */
+.page-card {
   transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 
-.page-card:hover,
-.stat-card:hover {
+.page-card:hover {
   box-shadow: var(--shadow-sm);
   border-color: var(--color-border-hover);
-}
-
-.page-card :focus-visible,
-.stat-card :focus-visible,
-.filter-bar :focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
 }
