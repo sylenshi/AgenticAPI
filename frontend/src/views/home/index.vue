@@ -3,7 +3,7 @@
 <template>
   <div class="home-page" ref="containerRef">
     <!-- 屏1：Hero -->
-    <section class="slide slide-hero" :class="{ 'is-active': currentIndex === 0 }">
+    <section ref="heroSectionRef" class="slide slide-hero" :class="{ 'is-active': currentIndex === 0 }">
       <!-- 静态渐变背景：顶部光束 + 三枚色斑（借鉴 Nexus aurora 光效，不做动画） -->
       <div class="hero-aurora" aria-hidden="true">
         <div class="aurora-blob blob-blue"></div>
@@ -11,6 +11,57 @@
         <div class="aurora-blob blob-cyan"></div>
       </div>
       <div class="slide-inner hero-inner">
+        <!-- ═══ 首屏动态标识：三路光带汇聚 → 玻璃节点（定稿主标）→ 三路发散 ═══
+             摘取自 docs/assets/参考的首页组件.html 的 living mark 部分：
+             流光 SVG + 玻璃节点 + 鼠标视差；远程定稿图换成本地 logo1（logo-mark.png）。 -->
+        <div class="hero-mark" aria-hidden="true">
+          <div class="mark-flow-wrap">
+            <svg class="mark-flow" viewBox="0 0 1240 440" preserveAspectRatio="xMidYMid meet">
+              <defs>
+                <linearGradient id="markFlowGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1240" y2="0">
+                  <stop offset="0" stop-color="#7FA9EC"/>
+                  <stop offset="0.46" stop-color="#A9A4E9"/>
+                  <stop offset="1" stop-color="#8ED6C8"/>
+                </linearGradient>
+                <linearGradient id="markPulseGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1240" y2="0">
+                  <stop offset="0" stop-color="#C6DCF6"/>
+                  <stop offset="0.46" stop-color="#DAD6F6"/>
+                  <stop offset="1" stop-color="#C6EBE2"/>
+                </linearGradient>
+              </defs>
+              <g class="mark-lanes">
+                <g style="--phase: 0s">
+                  <path class="rb-bed-halo" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48"/>
+                  <path class="rb-bed" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48"/>
+                  <path class="rb-pulse rb-halo" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48"/>
+                  <path class="rb-pulse rb-beam" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48"/>
+                  <path class="rb-pulse rb-head" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48"/>
+                </g>
+                <g style="--phase: -1s">
+                  <path class="rb-bed-halo" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220"/>
+                  <path class="rb-bed" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220"/>
+                  <path class="rb-pulse rb-halo" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220"/>
+                  <path class="rb-pulse rb-beam" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220"/>
+                  <path class="rb-pulse rb-head" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220"/>
+                </g>
+                <g style="--phase: -2s">
+                  <path class="rb-bed-halo" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392"/>
+                  <path class="rb-bed" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392"/>
+                  <path class="rb-pulse rb-halo" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392"/>
+                  <path class="rb-pulse rb-beam" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392"/>
+                  <path class="rb-pulse rb-head" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392"/>
+                </g>
+              </g>
+            </svg>
+            <div class="mark-node-parallax">
+              <div class="mark-node">
+                <span class="mark-sheen"></span>
+                <img class="mark-node-logo" :src="logoMark" alt=""/>
+              </div>
+            </div>
+          </div>
+          <div class="mark-labels"><span>IN</span><span>ROUTE</span><span>OUT</span></div>
+        </div>
         <p class="slide-eyebrow">AGENTIC API · 大模型中转站</p>
         <h1 class="hero-title">由 Agent 自主运营维护的<br/><span class="hero-title-key">新一代智能 API 中转站</span>
         </h1>
@@ -300,6 +351,7 @@ import {useModelListStore} from '@/stores/modelList'
 import {useUserStore} from '@/stores/user'
 import LobeIcon from '@/components/common/LobeIcon.vue'
 import LineChart from '@/components/monitor/LineChart.vue'
+import logoMark from '@/assets/images/logo-mark.png'
 
 const modelListStore = useModelListStore()
 const userStore = useUserStore()
@@ -449,6 +501,55 @@ onUnmounted(() => {
   dom.removeEventListener('touchstart', handleTouchStart)
   dom.removeEventListener('touchmove', handleTouchMove)
   window.removeEventListener('keydown', handleKeydown)
+})
+
+// ═══════════ 首屏动态标识：鼠标视差（摘取自参考 HTML，reduced-motion 时静止） ═══════════
+const heroSectionRef = ref<HTMLElement | null>(null)
+let markFrameId = 0
+let markTx = 0, markTy = 0, markPx = 0, markPy = 0
+let markReduce = false
+
+function handleMarkPointer(e: PointerEvent) {
+  const el = heroSectionRef.value
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  markTx = (e.clientX - r.left) / r.width - 0.5
+  markTy = (e.clientY - r.top) / r.height - 0.5
+}
+
+function resetMarkPointer() {
+  markTx = 0
+  markTy = 0
+}
+
+function markFrame() {
+  markPx += (markTx - markPx) * 0.055
+  markPy += (markTy - markPy) * 0.055
+  const el = heroSectionRef.value
+  if (el) {
+    el.style.setProperty('--px', (markReduce ? 0 : markPx).toFixed(4))
+    el.style.setProperty('--py', (markReduce ? 0 : markPy).toFixed(4))
+  }
+  markFrameId = requestAnimationFrame(markFrame)
+}
+
+onMounted(() => {
+  markReduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const el = heroSectionRef.value
+  if (el) {
+    el.addEventListener('pointermove', handleMarkPointer, {passive: true})
+    el.addEventListener('pointerleave', resetMarkPointer)
+  }
+  markFrameId = requestAnimationFrame(markFrame)
+})
+
+onUnmounted(() => {
+  cancelAnimationFrame(markFrameId)
+  const el = heroSectionRef.value
+  if (el) {
+    el.removeEventListener('pointermove', handleMarkPointer)
+    el.removeEventListener('pointerleave', resetMarkPointer)
+  }
 })
 </script>
 
@@ -1337,5 +1438,152 @@ onUnmounted(() => {
   .scroll-hint {
     display: none;
   }
+}
+
+/* ═══════════ 首屏动态标识（摘取自 docs/assets/参考的首页组件.html） ═══════════ */
+.hero-mark {
+  width: min(100%, 760px);
+  margin: 0 auto var(--space-5);
+  pointer-events: none;
+}
+
+.mark-flow-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1240 / 440;
+  max-height: clamp(150px, 23vh, 240px);
+}
+
+.mark-flow {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: translate3d(calc(var(--px, 0) * 16px), calc(var(--py, 0) * 12px), 0);
+  transition: transform .14s linear;
+}
+
+.mark-lanes { transform-box: fill-box; transform-origin: center; }
+
+.rb-bed-halo {
+  fill: none; stroke: url(#markPulseGrad); stroke-width: 30;
+  stroke-linecap: round; opacity: .16; filter: blur(9px);
+}
+.rb-bed {
+  fill: none; stroke: url(#markFlowGrad); stroke-width: 3.2;
+  stroke-linecap: round; opacity: .26;
+}
+.rb-pulse {
+  fill: none; stroke-linecap: butt;
+  animation: markStream 3s linear infinite;
+  animation-delay: var(--phase, 0s);
+  will-change: stroke-dashoffset;
+}
+.rb-halo {
+  stroke: url(#markPulseGrad); stroke-width: 26; stroke-linecap: round;
+  opacity: .5; filter: blur(6px); stroke-dasharray: 180 220;
+}
+.rb-beam {
+  stroke: url(#markFlowGrad); stroke-width: 11;
+  opacity: .6; filter: blur(1px); stroke-dasharray: 0.01 96 84 219.99;
+}
+.rb-head {
+  stroke: url(#markPulseGrad); stroke-width: 8;
+  opacity: .98; stroke-dasharray: 0.01 152 28 219.99;
+}
+@keyframes markStream {
+  0%   { stroke-dashoffset: 0; }
+  5%   { stroke-dashoffset: -12.58; }
+  10%  { stroke-dashoffset: -25.89; }
+  15%  { stroke-dashoffset: -40.58; }
+  20%  { stroke-dashoffset: -57.17; }
+  25%  { stroke-dashoffset: -76; }
+  30%  { stroke-dashoffset: -97.17; }
+  35%  { stroke-dashoffset: -120.58; }
+  40%  { stroke-dashoffset: -145.89; }
+  45%  { stroke-dashoffset: -172.58; }
+  50%  { stroke-dashoffset: -200; }
+  55%  { stroke-dashoffset: -227.42; }
+  60%  { stroke-dashoffset: -254.11; }
+  65%  { stroke-dashoffset: -279.42; }
+  70%  { stroke-dashoffset: -302.83; }
+  75%  { stroke-dashoffset: -324; }
+  80%  { stroke-dashoffset: -342.83; }
+  85%  { stroke-dashoffset: -359.42; }
+  90%  { stroke-dashoffset: -374.11; }
+  95%  { stroke-dashoffset: -387.42; }
+  100% { stroke-dashoffset: -400; }
+}
+
+/* 中央玻璃节点：内嵌 logo1 定稿主标，替代参考稿里的远程图片 */
+.mark-node-parallax {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%)
+             translate3d(calc(var(--px, 0) * -24px), calc(var(--py, 0) * -18px), 0)
+             rotateY(calc(var(--px, 0) * 5deg)) rotateX(calc(var(--py, 0) * -5deg));
+  transform-style: preserve-3d;
+  transition: transform .16s ease-out;
+}
+.mark-node {
+  width: clamp(96px, 12vw, 148px);
+  height: clamp(96px, 12vw, 148px);
+  border-radius: clamp(22px, 2.6vw, 34px);
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, .6);
+  border: 1px solid rgba(255, 255, 255, .92);
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  box-shadow: 0 30px 60px -26px rgba(28, 43, 69, .28), inset 0 1px 0 rgba(255, 255, 255, .95);
+  overflow: hidden;
+  animation: markNodeTick 3s linear infinite;
+  animation-delay: -1s;
+}
+.mark-node-logo {
+  position: relative; z-index: 1;
+  width: 82%; height: 82%; object-fit: contain;
+}
+.mark-sheen {
+  position: absolute; inset: -32%; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(34% 34% at 30% 26%, rgba(255, 255, 255, .92), rgba(255, 255, 255, 0) 72%);
+  animation: markSheen 12s linear infinite;
+}
+@keyframes markSheen { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes markNodeTick {
+  0%, 2%, 98%, 100% { transform: scale(1) translateY(0); }
+  9%  { transform: scale(1.012) translateY(-1px); }
+  16%, 35% { transform: scale(1) translateY(0); }
+  42% { transform: scale(1.012) translateY(-1px); }
+  49%, 68% { transform: scale(1) translateY(0); }
+  75% { transform: scale(1.012) translateY(-1px); }
+  82% { transform: scale(1) translateY(0); }
+}
+
+.mark-labels {
+  display: flex; justify-content: space-between;
+  width: min(100%, 640px);
+  margin: -4px auto 0;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 500; letter-spacing: .34em;
+  color: var(--color-text-muted); opacity: .72;
+}
+.mark-labels span::before {
+  content: ''; display: inline-block; width: 14px; height: 1px;
+  margin-right: 9px; vertical-align: middle;
+  background: linear-gradient(90deg, #7FA9EC, #A9A4E9);
+}
+
+@media (max-width: 768px) {
+  .hero-mark { margin-bottom: var(--space-3); }
+  .mark-labels { display: none; }
+  .rb-halo { stroke-width: 18; }
+  .rb-beam { stroke-width: 8; }
+  .rb-head { stroke-width: 6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rb-pulse, .mark-sheen, .mark-node, .mark-node-parallax, .mark-flow {
+    animation: none !important;
+    transition: none !important;
+  }
+  .rb-halo, .rb-beam, .rb-head { stroke-dashoffset: -208; }
 }
 </style>

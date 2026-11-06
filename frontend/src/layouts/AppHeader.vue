@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
-import logoImage from '@/assets/images/logo.jpg'
+import logoImage from '@/assets/images/logo-icon.png'
 import { navItems } from '@/constants/nav'
 import { useUserStore } from '@/stores/user'
 import { confirmDialog } from '@/utils/feedback'
@@ -167,7 +167,7 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);
-  object-fit: cover;
+  object-fit: contain;
 }
 
 /* 品牌字：英文展示衬线 Playfair Display（纯英文品牌名直接命中字体栈首个），
