@@ -129,6 +129,9 @@ dmypy.json
 *.bak
 *.backup
 
+# 本地审查/测试工作目录（不入库）
+/temp/
+
 # 上传文件 / 本地数据（如果不需要提交）
 # uploads/
 # local_data/
