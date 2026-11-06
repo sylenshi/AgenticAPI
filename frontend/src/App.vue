@@ -13,7 +13,7 @@ onMounted(() => {
 })
 
 // 拉取站点公开配置（对外中转接口地址，来自后端 .env 的 PUBLIC_BASE_URL），
-// 秘钥页 / 模型示例面板等展示的接口地址都从这里取
+// 密钥页 / 模型示例面板等展示的接口地址都从这里取
 const siteStore = useSiteStore()
 onMounted(() => {
   siteStore.loadSiteInfo()

@@ -126,6 +126,10 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
   top: 0;
   z-index: 50;
   height: var(--layout-header-height);
+  /* 顶栏与首页保持改版前的字体：品牌字走 --font-display，导航走系统字体链 */
+  --font-sans: 'Public Sans Variable', 'Public Sans', 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  font-family: var(--font-sans);
+  letter-spacing: normal;
   /* 毛玻璃：半透明白底 + 背景模糊，内容从栏下滚过时有景深（克制档） */
   background-color: rgba(255, 255, 255, 0.85);
   -webkit-backdrop-filter: saturate(180%) blur(8px);
@@ -186,7 +190,7 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
   align-self: stretch;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 769px) {
   .header-nav {
     display: flex;
   }

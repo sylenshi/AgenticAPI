@@ -37,6 +37,7 @@
           row-key="channelName"
           :bordered="{wrapper: true}"
           :pagination="false"
+          :scroll="{x: 900}"
           size="small"
       >
         <template #status="{ record }">
@@ -61,7 +62,7 @@
       <a-form :model="channelForm" layout="vertical">
         <!-- 基本信息 -->
         <div class="config-section">
-          <h5>基本信息</h5>
+          <h3>基本信息</h3>
           <a-form-item label="渠道名称">
             <!-- 编辑模式下渠道名称不可修改（后端不允许更新 channel_name） -->
             <a-input
@@ -112,7 +113,7 @@
 
         <!-- 运行参数 -->
         <div class="config-section">
-          <h5>运行参数</h5>
+          <h3>运行参数</h3>
           <a-form-item label="状态">
             <a-switch v-model="channelForm.status"/>
             <span class="switch-hint">{{ channelForm.status ? '启用' : '禁用' }}</span>

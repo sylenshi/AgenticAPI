@@ -136,7 +136,7 @@ const router = createRouter({
 
 // 全局前置守卫：需要登录的页面分级准入
 // - 未登录：唤起登录弹窗并中断跳转（登录成功后按 store 里记录的目标页跳回）
-// - 管理页（requiresAdmin）：非管理员拦截（访客与普通用户同权限，均可进入概览/秘钥页）
+// - 管理页（requiresAdmin）：非管理员拦截（访客与普通用户同权限，均可进入概览/密钥页）
 async function ensureUserInfo(userStore: ReturnType<typeof useUserStore>) {
     // 刷新页面后 store 里只有令牌没有用户信息，先拉一次（令牌无效会被拦截器清理并弹登录框）
     if (userStore.token && !userStore.userInfo) {

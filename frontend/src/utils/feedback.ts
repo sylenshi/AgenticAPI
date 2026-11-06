@@ -17,6 +17,8 @@ export function confirmDialog(
       okButtonProps: danger ? { status: 'danger' } : undefined,
       onOk: () => resolve(true),
       onCancel: () => resolve(false),
+      // 点遮罩 / ESC 关闭时也要 resolve，否则调用方 `if (!confirmed) return` 之后静默卡死
+      onClose: () => resolve(false),
     })
   })
 }

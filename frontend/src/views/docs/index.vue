@@ -433,7 +433,7 @@ onMounted(() => {
   padding: 0.2em 0.4em;
   background-color: var(--color-gray-100);
   border-radius: var(--radius-sm);
-  color: var(--color-error);
+  color: var(--color-text);
 }
 
 .prose :deep(blockquote) {

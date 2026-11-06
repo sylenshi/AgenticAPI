@@ -104,10 +104,7 @@
         </template>
       </div>
 
-      <!-- 占位空卡：保持 2×3 网格，后续扩充新渠道时替换 -->
-      <div v-for="n in 2" :key="'empty-' + n" class="plan-card plan-card--empty">
-        <span class="plan-empty-hint">待扩充</span>
-      </div>
+      <!-- 占位空卡已移除：新增上游渠道时直接追加 plan-card 即可 -->
 
     </div>
 
@@ -326,10 +323,9 @@ const loadSettings = () => {
 
 /* ═══════════════════════ 设置面板 ═══════════════════════ */
 
-// 保存设置到 localStorage
+// 输入过程中静默写入 localStorage，避免逐字符弹 Toast；提示统一在"保存到服务器"后给出
 const saveSettings = () => {
   localStorage.setItem(LS_SETTINGS, JSON.stringify(settings.value))
-  Message.success('设置已保存')
 }
 
 // 将更新后的设置上传到后端
@@ -681,7 +677,8 @@ onMounted(() => {
 
 .error-text {
   font-size: var(--text-sm);
-  color: var(--color-error);
+  /* status 初始值"请刷新用量"并非错误，用中性色避免整页红字 */
+  color: var(--color-text-secondary);
   padding: var(--space-4) 0;
 }
 </style>

@@ -587,7 +587,9 @@
    页面局部只写自己特有的样式，避免同样的 CSS 在各页面复制。
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── 页面标题区 ── */
+/* ── 页面标题区（2026-11 改版） ──
+   加大字号/字重拉开与卡片标题的层级；块级布局保证标题独占首行
+   （曾改为 flex 让标题与工具条同排，导致 UserList 等页错位，已回退）。 */
 .page-head {
   margin-bottom: var(--space-5);
 }
@@ -595,25 +597,35 @@
 .page-head h1,
 .page-head h2 {
   margin: 0 0 var(--space-1);
-  font-size: var(--text-xl);
-  font-weight: var(--font-semibold);
+  font-size: var(--text-page-title);
+  font-weight: var(--font-bold);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
   color: var(--color-text);
 }
 
 .page-head-desc {
   margin: 0;
   font-size: var(--text-sm);
+  line-height: 1.6;
   color: var(--color-text-secondary);
 }
 
+/* 放进标题区里的工具栏：独占一行排在标题下方，不与标题并排 */
+.page-head .filter-bar,
+.page-head .action-bar {
+  margin-top: var(--space-3);
+  margin-bottom: 0;
+}
+
 /* ── 统计卡片（监控面板 / 概览等） ──
-   左对齐 + 彩色左脊线：每张卡通过 --stat-accent 指定自己的强调色，
-   不指定时退回主色。数值用等宽数字，标签用小号次级文字。 */
+   auto-fit 自适应：3 张 / 4 张卡自动排布，页面不再反写列数；
+   白卡浮于浅灰底，彩色左脊线 + 等宽大号数值。 */
 .stat-cards {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .stat-card {
@@ -622,6 +634,7 @@
   border-left: 3px solid var(--stat-accent, var(--color-primary));
   border-radius: var(--radius-lg);
   padding: var(--space-3) var(--space-4);
+  box-shadow: var(--shadow-card);
 }
 
 .stat-accent-green { --stat-accent: var(--color-success); }
@@ -631,15 +644,18 @@
 .stat-accent-gold { --stat-accent: var(--color-gold); }
 
 .stat-label {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: var(--text-xs);
+  letter-spacing: 0.02em;
   margin-bottom: var(--space-1);
 }
 
 .stat-value {
   font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: var(--font-semibold);
+  font-size: var(--text-2xl);
+  font-weight: var(--font-bold);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
 }
@@ -648,19 +664,18 @@
   color: var(--stat-accent, var(--color-primary));
 }
 
-@media (max-width: 900px) {
-  .stat-cards {
-    grid-template-columns: 1fr;
-  }
-}
 
-/* ── 筛选 / 工具栏 ── */
+/* ── 筛选 / 工具栏（浅色工具条） ── */
 .filter-bar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
   margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
 }
 
 .filter-tip {
@@ -672,6 +687,8 @@
 /* ── 表格分页 ── */
 .table-pagination {
   margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border-subtle);
   display: flex;
   justify-content: flex-end;
 }
@@ -687,10 +704,11 @@
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: var(--radius-full);
   background-color: var(--color-gray-400);
+  box-shadow: 0 0 0 2px var(--color-white);
   flex-shrink: 0;
 }
 
@@ -712,4 +730,26 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
+  box-shadow: var(--shadow-card);
+}
+
+/* ── 共享容器统一交互态（2026-11 新增） ──
+   静止几乎无阴影（边框负责分隔），悬停最多 shadow-sm；焦点环与 Arco 控件同语言。 */
+.page-card,
+.stat-card,
+.filter-bar {
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.page-card:hover,
+.stat-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--color-border-hover);
+}
+
+.page-card :focus-visible,
+.stat-card :focus-visible,
+.filter-bar :focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }

@@ -26,7 +26,7 @@ export const navItems: navItem[] = [
 
 export const dashItems: dashItem[] = [
     {id: 1, name: '概览', to: '/dashboard/overview', icon: 'icon-dashboard'},
-    {id: 2, name: '秘钥', to: '/dashboard/keys', icon: 'icon-safe'},
+    {id: 2, name: '密钥', to: '/dashboard/keys', icon: 'icon-safe'},
     {id: 3, name: '渠道', to: '/dashboard/channels', icon: 'icon-swap'},
     {id: 4, name: '运营', to: '/dashboard/operations', icon: 'icon-computer'},
     {id: 5, name: '用户', to: '/dashboard/userlist', icon: 'icon-user-group'},

@@ -1,13 +1,38 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Arco Design 细节微调（仅亮色主题）
-   Arco 默认样式已与全站令牌一致（arcoblue 主色 + gray 中性色），
-   这里只做少量贴合本项目布局的细节调整，不做大范围覆盖。
-   全站密度基调：紧凑型企业控制台 —— 表格 13px、行距收紧、表单间距 16px。
+   Arco Design 全局覆写（仅亮色主题）
+   main.ts 中 arco.css 先加载、本文件（经 index.css）后加载，靠顺序与特异性生效，
+   不使用 !important（全库唯一 4 个 !important 在 reset.css 的 reduced-motion 降级里）。
+
+   2026-11 改版重点：
+   1) 表格重做：行高由 ~38px 压到 ~28px，表头层次、细分隔线、行悬停、数字对齐；
+   2) 高频组件（a-button 93 处 / a-tag 13 处 / 输入类 / 弹层）打通设计令牌——
+      之前这些组件沿用 Arco 默认 4px 圆角与系统字体，与全站 2px + Public Sans/思源黑体割裂；
+   3) 表单、描述列表、分页、消息、空态统一到同一密度与交互语言。
+   全站密度基调：紧凑型企业控制台 —— 表格 13px、行距收紧、控件 32px。
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* ── 聚焦态：输入类组件统一柔光焦点环 ──
-   Arco 默认聚焦只有边框变色，这里补上 3px 光环，与自研 .input / .select 同语言；
-   类名与 Arco 内部一致（wrapper 聚焦时挂 *-focus 类） */
+/* ── 0. 全局：数字等宽 + 中文字体打通 ───────────────────────────────────── */
+body,
+.arco-table,
+.arco-descriptions,
+.arco-pagination,
+.arco-statistic {
+  font-variant-numeric: tabular-nums;
+}
+
+.arco-btn,
+.arco-input-wrapper,
+.arco-select-view-single,
+.arco-select-view-multiple,
+.arco-textarea-wrapper,
+.arco-tag,
+.arco-message,
+.arco-modal,
+.arco-drawer {
+  font-family: var(--font-sans);
+}
+
+/* ── 1. 聚焦态：输入类组件统一柔光焦点环 ───────────────────────────────── */
 .arco-input-wrapper.arco-input-focus,
 .arco-textarea-wrapper.arco-textarea-focus,
 .arco-select-view-single.arco-select-view-focus,
@@ -16,7 +41,6 @@
   box-shadow: 0 0 0 3px var(--color-focus-ring);
 }
 
-/* 表单校验错误时的聚焦环跟随错误色（Arco 默认只变边框） */
 .arco-form-item-status-error .arco-input-wrapper.arco-input-focus,
 .arco-form-item-status-error .arco-textarea-wrapper.arco-textarea-focus,
 .arco-form-item-status-error .arco-select-view-single.arco-select-view-focus,
@@ -24,46 +48,170 @@
   box-shadow: 0 0 0 3px var(--color-focus-ring-error);
 }
 
-/* ── 全局密度：表格 ── */
+/* ── 2. 表格：紧凑重做（核心） ───────────────────────────────────────────
+   目标：行高 ≈ 28px（原 padding 9px×2 + 默认行高 ≈ 38px），
+   表头与正文分层、行间细线分隔、悬停浅蓝高亮、数字等宽对齐。 */
 .arco-table {
   font-size: 13px;
-  /* 表格以数字列为主，统一等宽数字对齐 */
   font-variant-numeric: tabular-nums;
-  /* 圆角裁剪：外层收边，行悬停高亮不再溢出直角（内层 .arco-table-container 滚动不受影响） */
+  line-height: var(--density-cell-line);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  background-color: var(--color-white);
 }
 
 .arco-table .arco-table-th {
-  padding: 8px 12px;
+  padding: var(--density-head-padding) 12px;
   font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.02em;
+  color: var(--color-text-secondary);
+  background-color: var(--color-gray-50);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
 }
 
 .arco-table .arco-table-td {
-  padding: 9px 12px;
-  /* 行悬停底色淡入，替代生硬的瞬变 */
+  padding: var(--density-row-padding) 12px;
+  line-height: var(--density-cell-line);
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: middle;
   transition: background-color var(--transition-fast);
 }
 
-/* 表格：表头浅灰底 + 次级文字色，行悬停高亮 */
-.arco-table-th {
-  background-color: var(--color-gray-50);
-  color: var(--color-text-secondary);
-  font-weight: var(--font-medium);
+/* size="small" 时 Arco 自带 padding，这里统一回同一密度 */
+.arco-table-size-small .arco-table-th,
+.arco-table-size-small .arco-table-td {
+  padding: var(--density-row-padding) 12px;
+}
+
+.arco-table-size-small .arco-table-th {
+  padding-top: var(--density-head-padding);
+  padding-bottom: var(--density-head-padding);
+}
+
+.arco-table-tr:last-child .arco-table-td {
+  border-bottom: 0;
 }
 
 .arco-table-tr:hover .arco-table-td:not(.arco-table-col-fixed-left, .arco-table-col-fixed-right) {
-  background-color: var(--color-gray-50);
+  background-color: var(--color-row-hover);
 }
 
-/* 表格展开行内部背景与内边距 */
+/* 展开行 / 空态：跟随紧凑节奏 */
 .arco-table-expand-row {
-  padding: var(--space-2) 0;
+  padding: var(--space-1) 0;
 }
 
-/* ── 全局密度：表单 / 描述列表 / 弹窗 ── */
+.arco-table .arco-empty {
+  padding: var(--space-6) 0;
+}
+
+/* 表格内的操作按钮与标签是撑高行高的主因，统一压到 24px */
+.arco-table-td .arco-btn {
+  height: var(--control-height-mini);
+  min-height: var(--control-height-mini);
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.arco-table-td .arco-tag {
+  margin: 0;
+  line-height: 18px;
+}
+
+.arco-table-td code,
+.arco-table-td .arco-typography code {
+  font-size: 12px;
+  padding: 1px 6px;
+}
+
+/* 固定列与滚动容器：圆角裁剪只作用于外层，内层滚动不受影响 */
+.arco-table-container {
+  scrollbar-width: thin;
+}
+
+/* ── 3. 按钮：2px 圆角、统一字重、按压与焦点反馈 ───────────────────────── */
+.arco-btn {
+  border-radius: var(--radius-control);
+  font-weight: var(--font-medium);
+  letter-spacing: 0.01em;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast), box-shadow var(--transition-fast), transform 100ms ease;
+}
+
+.arco-btn:not(.arco-btn-loading):not(.arco-btn-disabled):active {
+  transform: translateY(1px);
+}
+
+.arco-btn:focus-visible {
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+
+.arco-btn-primary {
+  box-shadow: var(--shadow-primary);
+}
+
+.arco-btn-primary:hover {
+  box-shadow: 0 2px 8px rgba(22, 93, 255, 0.24);
+}
+
+.arco-btn-primary:active {
+  box-shadow: 0 1px 2px rgba(22, 93, 255, 0.16);
+}
+
+/* 文字按钮：hover 浅底，避免只剩颜色变化 */
+.arco-btn-text:not(.arco-btn-disabled):hover {
+  background-color: var(--color-gray-100);
+}
+
+/* ── 4. 标签：紧凑、小圆角、字重 ───────────────────────────────────────── */
+.arco-tag {
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 6px;
+  font-weight: var(--font-medium);
+}
+
+.arco-tag-size-small {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 5px;
+}
+
+/* ── 5. 输入类控件：圆角 / 字体 / 高度 ─────────────────────────────────── */
+.arco-input-wrapper,
+.arco-textarea-wrapper,
+.arco-select-view-single,
+.arco-select-view-multiple,
+.arco-input-number,
+.arco-picker {
+  border-radius: var(--radius-control);
+}
+
+.arco-input-wrapper,
+.arco-select-view-single,
+.arco-select-view-multiple {
+  min-height: 30px;
+}
+
+.arco-input-wrapper .arco-input,
+.arco-select-view-value,
+.arco-textarea {
+  font-size: 13px;
+}
+
+/* ── 6. 表单 / 描述列表：收紧纵向节奏 ──────────────────────────────────── */
 .arco-form-item {
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.arco-form-item-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }
 
 .arco-descriptions {
@@ -72,53 +220,103 @@
 
 .arco-descriptions .arco-descriptions-item-label-block,
 .arco-descriptions .arco-descriptions-item-value-block {
-  padding: 9px 12px;
+  padding: 6px 10px;
+}
+
+/* ── 7. 弹窗 / 抽屉 / 弹层：圆角、描边、景深 ──────────────────────────── */
+.arco-modal,
+.arco-drawer,
+.arco-trigger-popup,
+.arco-select-popup,
+.arco-dropdown {
+  border-radius: var(--radius-xl);
+}
+
+.arco-modal,
+.arco-drawer,
+.arco-trigger-popup {
+  box-shadow: var(--shadow-lg);
 }
 
 .arco-modal-header .arco-modal-title {
   font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+}
+
+.arco-drawer-header .arco-drawer-title {
+  font-weight: var(--font-semibold);
 }
 
 .arco-drawer-body {
   padding: var(--space-4) var(--space-5);
 }
 
-/* 全局弹层圆角与描边统一 */
-.arco-modal,
-.arco-drawer,
-.arco-trigger-popup,
-.arco-select-popup,
-.arco-dropdown {
-  border-radius: var(--radius-lg);
-}
-
-/* 弹层遮罩加轻模糊：保持默认遮罩色，只增加一层景深（克制档 2px） */
+/* 遮罩加轻模糊：保持默认遮罩色，只增加一层景深（克制档 3px） */
 .arco-modal-mask,
 .arco-drawer-mask {
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(3px);
 }
 
-/* 分页器与表格间距配合：去掉默认 margin-top 由页面自行控制 */
+/* ── 8. 分页 / 消息 / 标签页 / 开关 ────────────────────────────────────── */
 .arco-pagination {
   row-gap: var(--space-2);
+  font-size: 13px;
 }
 
-/* 消息提示宽度略收紧 */
+.arco-pagination-item,
+.arco-pagination-item-prev,
+.arco-pagination-item-next,
+.arco-pagination-options .arco-select-view-single {
+  border-radius: var(--radius-control);
+}
+
+.arco-pagination-item-active {
+  font-weight: var(--font-semibold);
+}
+
 .arco-message-list {
   width: 380px;
 }
 
-/* 抽屉标题字重 */
-.arco-drawer-header .arco-drawer-title {
-  font-weight: var(--font-semibold);
+.arco-message {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
 }
 
-/* 标签页：激活项字重 */
 .arco-tabs-tab-active .arco-tabs-tab-title {
   font-weight: var(--font-semibold);
 }
 
-/* 数字输入框过窄时隐藏步进按钮文本溢出 */
+.arco-tabs-tab-title {
+  font-size: 13px;
+}
+
 .arco-input-number-step-button {
   padding: 0;
+}
+
+/* ── 9. 空态 / 骨架 / 加载：跟随紧凑密度 ───────────────────────────────── */
+.arco-empty-description {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.arco-spin {
+  font-size: 13px;
+}
+
+/* ── 10. 窄屏兜底：表格横向滚动条不被外层裁切 ─────────────────────────── */
+@media (max-width: 900px) {
+  .arco-table .arco-table-th,
+  .arco-table .arco-table-td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+
+/* ── 11. 弹层窄屏兜底：11 处抽屉/弹窗使用固定 px 宽度，避免 375px 屏溢出 ── */
+.arco-drawer,
+.arco-modal {
+  max-width: calc(100vw - 32px);
 }

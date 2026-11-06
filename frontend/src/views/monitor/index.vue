@@ -121,7 +121,7 @@
               />
               <a-range-picker
                   v-model="logTimeRange" show-time format="YYYY-MM-DD HH:mm:ss"
-                  :style="{width: 390}"
+                  :style="{width: 'min(390px, 100%)'}"
               />
               <a-button type="primary" @click="searchLogs">查询</a-button>
               <a-button @click="resetLogFilter">重置</a-button>
@@ -160,7 +160,7 @@
             <a-space>
               <a-range-picker
                   v-model="statsTimeRange" show-time format="YYYY-MM-DD HH:mm:ss"
-                  :shortcuts="rangeShortcuts" :style="{width: 390}"
+                  :shortcuts="rangeShortcuts" :style="{width: 'min(390px, 100%)'}"
               />
               <a-select v-model="granularity" :style="{width: 110}">
                 <a-option label="按小时" value="hour"/>
@@ -574,7 +574,7 @@ watch([statsTimeRange, granularity], loadStats)
   word-break: break-word;
   max-height: 180px;
   overflow-y: auto;
-  font-family: inherit;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.6;
 }

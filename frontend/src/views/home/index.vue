@@ -381,7 +381,7 @@ const containerRef = ref<HTMLDivElement | null>(null)
 const currentIndex = ref(0)
 const isScrolling = ref(false)
 // 窄屏（手机）退化为普通纵向滚动，不做滚轮劫持
-const desktopQuery = window.matchMedia('(min-width: 768px)')
+const desktopQuery = window.matchMedia('(min-width: 769px)')
 
 function scrollToPage(index: number) {
   if (index < 0 || index >= sections.length) return
@@ -458,6 +458,34 @@ onUnmounted(() => {
   height: 100%;
   overflow: hidden;
   background-color: var(--color-bg);
+  /* 首页保留改版前的字体与排版：控制台页的字体/样式改版不作用于这里 */
+  --font-sans: 'Public Sans Variable', 'Public Sans', 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  --font-display: 'Playfair Display Variable', 'Playfair Display', 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'SimSun', serif;
+  font-family: var(--font-sans);
+  letter-spacing: normal;
+  font-variant-numeric: normal;
+}
+
+/* 首页共享类与 Arco 组件保留改版前观感 */
+.home-page .stat-card {
+  box-shadow: none;
+}
+
+.home-page .stat-label {
+  color: var(--color-text-muted);
+  letter-spacing: normal;
+}
+
+.home-page .stat-value {
+  font-size: 20px;
+  font-weight: var(--font-semibold);
+  letter-spacing: normal;
+}
+
+.home-page :deep(.arco-btn) {
+  font-weight: var(--font-normal);
+  letter-spacing: normal;
+  box-shadow: none;
 }
 
 /* ═══════════ 分屏骨架 ═══════════ */
@@ -1184,7 +1212,7 @@ onUnmounted(() => {
   padding: var(--space-3) var(--space-6);
   border-top: 1px solid var(--color-gray-700, #4e5969);
   font-size: var(--text-xs);
-  color: var(--color-gray-500);
+  color: var(--color-gray-300);
   text-align: center;
 }
 
@@ -1262,7 +1290,7 @@ onUnmounted(() => {
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .home-page {
     overflow-y: auto;
   }

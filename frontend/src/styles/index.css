@@ -1,29 +1,28 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    AgenticAPI — Global Styles Entry
    按顺序导入所有 CSS 模块，确保级联顺序正确
+
+   字体策略（2026-11 改版）：
+   - 拉丁字形：Public Sans Variable（正文）/ Manrope Variable（展示）/ JetBrains Mono（等宽）
+   - 控制台页中文：MiSans VF（misans 包，可变字重 150-700，56 个 unicode-range 分片按需加载）
+   - 首页 / 顶栏品牌字：Playfair Display + 思源宋体，保留改版前字体；
+     首页作用域内 --font-sans 回退到系统字体链，不受控制台字体改动影响
+   - 全部随构建打包、不走 CDN（国内直连可用）
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* 0. 自托管网络字体（@fontsource 随构建打包，不走 CDN，国内可直连）
-   - Public Sans：拉丁正文（人文主义无衬线，字节系风格）
-   - Manrope：几何展示字体（备用，拉丁）
-   - Playfair Display：英文展示衬线（高对比、笔锋优雅，400-900 字重），
-              与思源宋体气质匹配，通过字体栈按字符自动分工——
-              拉丁字母取它、中文汉字跳过它落到思源宋体，实现中英文各自最优
-   - Noto Serif SC 思源宋体：中文展示字（700/900 字重，高对比衬线，锋利挺拔；
-     101 个 unicode-range 分片，浏览器按需下载用到的分片）
-   - JetBrains Mono：等宽（代码 / 密钥 / 价格 / 统计数值）
-   中文正文仍走 variables.css 里的本地中文字体链 */
+/* 0. 自托管网络字体 */
 @import '@fontsource-variable/public-sans';
 @import '@fontsource-variable/manrope';
-@import '@fontsource-variable/playfair-display';
 @import '@fontsource-variable/jetbrains-mono';
+@import '@fontsource-variable/playfair-display';
 @import '@fontsource/noto-serif-sc/700.css';
 @import '@fontsource/noto-serif-sc/900.css';
+@import 'misans/lib/Normal/MiSansVF.min.css';
 
 /* 1. 设计令牌（CSS 变量） */
 @import './variables.css';
 
-/* 2. Arco Design 细节微调（须在 arco.css 之后生效，main.ts 中 arco.css 先于本文件引入） */
+/* 2. Arco Design 全局覆写（须在 arco.css 之后生效，main.ts 中 arco.css 先于本文件引入） */
 @import './arco-overrides.css';
 
 /* 3. 浏览器默认样式重置 */

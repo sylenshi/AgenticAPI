@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://unpkg.com" />
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="https://unpkg.com/@fortawesome/fontawesome-free@6.7.2/js/all.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    * {
+      scrollbar-width: none;
+      scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+    }
+  </style>
+</head>
+
+<body class="m-0 p-0 bg-canvas antialiased">
+  <link rel="stylesheet" href="https://fonts.googleapis.cn/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&display=swap" />
+
+  <style type="text/tailwindcss">
+    @theme {
+      --color-canvas: #F5F8FD;
+      --color-ink: #1C2B45;
+      --color-muted: #6B7A93;
+      --color-ice: #7FA9EC;
+      --color-peri: #A9A4E9;
+      --color-aqua: #8ED6C8;
+    }
+  </style>
+
+  <style>
+    :root { --px: 0; --py: 0; --scroll: 0; }
+
+    #hero {
+      font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+      color: #1C2B45;
+      background-color: #F5F8FD;
+    }
+
+    /* ---------- ambient atmosphere ---------- */
+    .amb-layer {
+      position: absolute; inset: 0; pointer-events: none;
+      transform: translate3d(calc(var(--px) * 20px), calc(var(--py) * 16px), 0);
+      transition: transform .14s linear;
+    }
+    .blob { position: absolute; border-radius: 50%; filter: blur(90px); }
+    .b1 {
+      width: 560px; height: 560px; left: -180px; top: -220px;
+      background: radial-gradient(circle, rgba(127,169,236,.30), rgba(127,169,236,0) 70%);
+      animation: drift1 12s cubic-bezier(.45,0,.2,1) infinite;
+    }
+    .b2 {
+      width: 620px; height: 620px; right: -220px; top: -240px;
+      background: radial-gradient(circle, rgba(169,164,233,.26), rgba(169,164,233,0) 70%);
+      animation: drift2 12s cubic-bezier(.45,0,.2,1) infinite;
+      animation-delay: -4s;
+    }
+    .b3 {
+      width: 600px; height: 600px; left: 34%; bottom: -300px;
+      background: radial-gradient(circle, rgba(142,214,200,.28), rgba(142,214,200,0) 70%);
+      animation: drift3 12s cubic-bezier(.45,0,.2,1) infinite;
+      animation-delay: -8s;
+    }
+    @keyframes drift1 { 0%,100% { transform: translate(0,0) scale(1); } 32% { transform: translate(58px,22px) scale(1.12); } 68% { transform: translate(22px,44px) scale(1.04); } }
+    @keyframes drift2 { 0%,100% { transform: translate(0,0) scale(1); } 38% { transform: translate(-60px,20px) scale(1.1); } 70% { transform: translate(-18px,48px) scale(1.02); } }
+    @keyframes drift3 { 0%,100% { transform: translate(0,0) scale(1); } 30% { transform: translate(46px,-42px) scale(1.14); } 65% { transform: translate(10px,-10px) scale(1.03); } }
+
+    .canvas-wash {
+      position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(120% 88% at 50% 42%, rgba(255,255,255,.82) 0%, rgba(255,255,255,0) 62%);
+    }
+
+    /* ---------- stage ---------- */
+    .stage-inner {
+      transform: translateY(calc(var(--scroll) * -22px));
+      transition: transform .18s ease-out;
+    }
+
+    /* ---------- directional, strictly periodic light flow ----------
+       MASTER LOOP = 12s. Every animation period divides 12s (12 / 3) and
+       every phase delay is a whole number of seconds, so the whole frame at
+       t = 0 and t = 12s is identical.
+
+       The travelling comet is a repeating stroke-dash pattern of period
+       400 user units. Each 3s cycle moves dashoffset by EXACTLY one period
+       (0 -> -400): because the pattern is periodic, offset -400 renders
+       identically to offset 0, so the pulse leaving the right edge is the
+       same pulse re-entering the left edge at the same phase -- no gather,
+       no stop, no reassembly. Path ends sit outside the viewBox (-60/1300),
+       so dashes are clipped off-screen and never pop in or out.
+
+       Velocity never reaches 0 and is equal at 0% and 100% (first and last
+       5% steps are both -12.58) => C1 at the seam. The 21 sampled stops give
+       a non-linear surge (~84 -> ~183 -> ~84 units/s).                      */
+    .flow-parallax {
+      transform: translate3d(calc(var(--px) * 16px), calc(var(--py) * 12px), 0);
+      transition: transform .14s linear;
+    }
+    .flow-svg { display: block; width: 100%; height: 100%; }
+    .ribbons { transform-box: fill-box; transform-origin: center; }
+
+    /* static beds keep the three converging / diverging lanes legible */
+    .rb-bed-halo {
+      fill: none; stroke: url(#pulseGrad); stroke-width: 30; stroke-linecap: round;
+      opacity: .16; filter: blur(9px);
+    }
+    .rb-bed {
+      fill: none; stroke: url(#flowGrad); stroke-width: 3.2; stroke-linecap: round;
+      opacity: .26;
+    }
+
+    /* three stacked dashes = one comet: soft tail, coloured band, bright tip */
+    .rb-pulse {
+      fill: none; stroke-linecap: butt;
+      animation: stream 3s linear infinite;
+      animation-delay: var(--phase, 0s);
+      will-change: stroke-dashoffset;
+    }
+    .rb-halo {
+      stroke: url(#pulseGrad); stroke-width: 26; stroke-linecap: round;
+      opacity: .5; filter: blur(6px);
+      stroke-dasharray: 180 220;                /* tail  s = 0 .. 180 */
+    }
+    .rb-beam {
+      stroke: url(#flowGrad); stroke-width: 11;
+      opacity: .6; filter: blur(1px);
+      stroke-dasharray: 0.01 96 84 219.99;      /* band  s = 96 .. 180 */
+    }
+    .rb-head {
+      stroke: url(#pulseGrad); stroke-width: 8;
+      opacity: .98;
+      stroke-dasharray: 0.01 152 28 219.99;     /* tip   s = 152 .. 180 */
+    }
+    @keyframes stream {
+      0%   { stroke-dashoffset: 0; }
+      5%   { stroke-dashoffset: -12.58; }
+      10%  { stroke-dashoffset: -25.89; }
+      15%  { stroke-dashoffset: -40.58; }
+      20%  { stroke-dashoffset: -57.17; }
+      25%  { stroke-dashoffset: -76; }
+      30%  { stroke-dashoffset: -97.17; }
+      35%  { stroke-dashoffset: -120.58; }
+      40%  { stroke-dashoffset: -145.89; }
+      45%  { stroke-dashoffset: -172.58; }
+      50%  { stroke-dashoffset: -200; }
+      55%  { stroke-dashoffset: -227.42; }
+      60%  { stroke-dashoffset: -254.11; }
+      65%  { stroke-dashoffset: -279.42; }
+      70%  { stroke-dashoffset: -302.83; }
+      75%  { stroke-dashoffset: -324; }
+      80%  { stroke-dashoffset: -342.83; }
+      85%  { stroke-dashoffset: -359.42; }
+      90%  { stroke-dashoffset: -374.11; }
+      95%  { stroke-dashoffset: -387.42; }
+      100% { stroke-dashoffset: -400; }
+    }
+
+    /* ---------- central rounded glass node ---------- */
+    .node-parallax {
+      position: absolute; left: 50%; top: 50%;
+      transform-origin: center; transform-style: preserve-3d;
+      transform: translate(-50%,-50%)
+                 translate3d(calc(var(--px) * -24px), calc(var(--py) * -18px), 0)
+                 rotateY(calc(var(--px) * 5deg)) rotateX(calc(var(--py) * -5deg));
+      transition: transform .16s ease-out;
+    }
+    .glass-node {
+      position: relative; width: clamp(128px, 15vw, 186px); height: clamp(128px, 15vw, 186px); border-radius: clamp(28px, 3.4vw, 42px);
+      background: rgba(255,255,255,.60);
+      border: 1px solid rgba(255,255,255,.92);
+      backdrop-filter: blur(22px) saturate(125%);
+      -webkit-backdrop-filter: blur(22px) saturate(125%);
+      box-shadow:
+        0 38px 72px -28px rgba(28,43,69,.30),
+        0 8px 22px -14px rgba(28,43,69,.18),
+        inset 0 1px 0 rgba(255,255,255,.95),
+        inset 0 0 44px rgba(255,255,255,.42);
+      overflow: hidden;
+      animation: nodeTick 3s linear infinite;
+      animation-delay: -1s;
+    }
+    /* slow wandering specular highlight inside the glass: a full 360deg
+       rotation at constant speed is C1 and exactly periodic over 12s */
+    .glass-sheen {
+      position: absolute; inset: -32%; border-radius: 50%; pointer-events: none;
+      background: radial-gradient(34% 34% at 30% 26%, rgba(255,255,255,.92), rgba(255,255,255,0) 72%);
+      animation: sheenOrbit 12s linear infinite;
+    }
+    @keyframes sheenOrbit {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    /* three gentle reactions per 3s, phase-locked to the three staggered
+       lanes' heads crossing the node; flat at 0% / 100% => no seam */
+    @keyframes nodeTick {
+      0%, 2%, 98%, 100% { transform: scale(1) translateY(0); }
+      9%  { transform: scale(1.012) translateY(-1px); }
+      16%, 35% { transform: scale(1) translateY(0); }
+      42% { transform: scale(1.012) translateY(-1px); }
+      49%, 68% { transform: scale(1) translateY(0); }
+      75% { transform: scale(1.012) translateY(-1px); }
+      82% { transform: scale(1) translateY(0); }
+    }
+    .glass-node::before {
+      content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      background: linear-gradient(145deg, rgba(255,255,255,.60), rgba(255,255,255,0) 46%);
+    }
+    .glass-node::after {
+      content: ""; position: absolute; inset: 1px; border-radius: inherit; pointer-events: none;
+      border: 1px solid rgba(255,255,255,.40);
+      -webkit-mask: linear-gradient(160deg, #000, transparent 55%);
+      mask: linear-gradient(160deg, #000, transparent 55%);
+    }
+    .node-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .a-halo {
+      fill: none; stroke: url(#aGrad); stroke-width: 22;
+      stroke-linecap: round; stroke-linejoin: round; opacity: .30; filter: blur(9px);
+    }
+    .a-core {
+      fill: none; stroke: url(#aGrad); stroke-width: 8;
+      stroke-linecap: round; stroke-linejoin: round; opacity: .92;
+    }
+    .a-glint {
+      fill: none; stroke: rgba(255,255,255,.82); stroke-width: 2; stroke-linecap: round;
+    }
+
+    /* ---------- type ---------- */
+    .wordmark {
+      font-family: "Space Grotesk", "Inter", sans-serif;
+      font-weight: 500; color: #1C2B45;
+      letter-spacing: .135em; line-height: 1.1;
+      font-size: clamp(2rem, 5.2vw, 4.15rem);
+    }
+    .micro {
+      font-family: "Inter", sans-serif; font-weight: 500;
+      letter-spacing: .34em; text-transform: uppercase;
+      font-size: 10px; color: rgba(107,122,147,.62); white-space: nowrap;
+    }
+    .micro::before {
+      content: ""; display: inline-block; width: 14px; height: 1px;
+      margin-right: 9px; vertical-align: middle;
+      background: linear-gradient(90deg, #7FA9EC, #A9A4E9);
+    }
+
+    /* ---------- finalized master mark anchor ---------- */
+    .master-wrap {
+      transform: translate3d(calc(var(--px) * -10px), calc(var(--py) * -8px), 0);
+      transition: transform .16s ease-out;
+    }
+    .master-plate {
+      position: relative; width: clamp(180px, 20vw, 264px); aspect-ratio: 3 / 2; border-radius: clamp(16px, 2.2vw, 24px);
+      background: rgba(255,255,255,.60);
+      border: 1px solid rgba(255,255,255,.92);
+      backdrop-filter: blur(18px) saturate(120%);
+      -webkit-backdrop-filter: blur(18px) saturate(120%);
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      box-shadow: 0 26px 54px -26px rgba(28,43,69,.24), inset 0 1px 0 rgba(255,255,255,.9);
+    }
+    .master-plate img {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%; object-fit: cover;
+      color: transparent; font-size: 0;
+    }
+    .master-fallback { width: clamp(64px, 9vw, 92px); height: clamp(64px, 9vw, 92px); }
+
+    .flow-stage {
+      width: 100%; aspect-ratio: 1240 / 440;
+      max-height: clamp(220px, 44vh, 440px);
+    }
+
+    @media (max-width: 640px) {
+      .rb-halo { stroke-width: 18; }
+      .rb-beam { stroke-width: 8; }
+      .rb-head { stroke-width: 6; }
+      .micro { font-size: 9px; letter-spacing: .26em; }
+      .micro::before { width: 10px; margin-right: 6px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .blob, .rb-pulse, .glass-sheen, .glass-node, .master-plate,
+      .amb-layer, .flow-parallax, .node-parallax, .master-wrap, .stage-inner {
+        animation: none !important;
+        transition: none !important;
+      }
+      /* a composed, legible still frame instead of a reset-looking blank */
+      .rb-halo, .rb-beam, .rb-head { stroke-dashoffset: -208; }
+    }
+  </style>
+
+  <main id="hero" class="relative min-h-screen w-full overflow-hidden bg-canvas">
+    <!-- soft ambient colour wash -->
+    <div class="amb-layer" aria-hidden="true">
+      <span class="blob b1"></span>
+      <span class="blob b2"></span>
+      <span class="blob b3"></span>
+    </div>
+    <div class="canvas-wash" aria-hidden="true"></div>
+
+    <section class="relative z-10 flex min-h-screen w-full flex-col items-center justify-center px-5 py-20 sm:px-10">
+      <div class="stage-inner w-full max-w-[1240px]">
+
+        <!-- ===== living mark: 3 inbound bands → glass node → 3 outbound bands ===== -->
+        <div class="flow-parallax flow-stage relative">
+          <svg class="flow-svg" viewBox="0 0 1240 440" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+            <defs>
+              <linearGradient id="flowGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1240" y2="0">
+                <stop offset="0" stop-color="#7FA9EC" />
+                <stop offset="0.46" stop-color="#A9A4E9" />
+                <stop offset="1" stop-color="#8ED6C8" />
+              </linearGradient>
+              <linearGradient id="pulseGrad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1240" y2="0">
+                <stop offset="0" stop-color="#C6DCF6" />
+                <stop offset="0.46" stop-color="#DAD6F6" />
+                <stop offset="1" stop-color="#C6EBE2" />
+              </linearGradient>
+            </defs>
+
+            <g class="ribbons">
+              <!-- lane 01 · upper · phase 0s -->
+              <g style="--phase:0s">
+                <path class="rb-bed-halo" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48" />
+                <path class="rb-bed"      d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48" />
+                <path class="rb-pulse rb-halo" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48" />
+                <path class="rb-pulse rb-beam" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48" />
+                <path class="rb-pulse rb-head" d="M -60 62 C 170 62, 320 150, 525 168 L 715 168 C 920 150, 1080 56, 1300 48" />
+              </g>
+              <!-- lane 02 · middle · phase -1s -->
+              <g style="--phase:-1s">
+                <path class="rb-bed-halo" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220" />
+                <path class="rb-bed"      d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220" />
+                <path class="rb-pulse rb-halo" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220" />
+                <path class="rb-pulse rb-beam" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220" />
+                <path class="rb-pulse rb-head" d="M -60 220 C 200 220, 350 220, 525 220 L 715 220 C 940 220, 1100 220, 1300 220" />
+              </g>
+              <!-- lane 03 · lower · phase -2s -->
+              <g style="--phase:-2s">
+                <path class="rb-bed-halo" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392" />
+                <path class="rb-bed"      d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392" />
+                <path class="rb-pulse rb-halo" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392" />
+                <path class="rb-pulse rb-beam" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392" />
+                <path class="rb-pulse rb-head" d="M -60 378 C 170 378, 320 290, 525 272 L 715 272 C 920 290, 1080 384, 1300 392" />
+              </g>
+            </g>
+          </svg>
+
+          <!-- breathing rounded glass node with the abstract A -->
+          <div class="node-parallax">
+            <div class="glass-node">
+              <span class="glass-sheen" aria-hidden="true"></span>
+              <svg class="node-svg" viewBox="0 0 200 200" aria-hidden="true">
+                <defs>
+                  <linearGradient id="aGrad" gradientUnits="userSpaceOnUse" x1="40" y1="30" x2="165" y2="170">
+                    <stop offset="0" stop-color="#7FA9EC" />
+                    <stop offset="0.5" stop-color="#A9A4E9" />
+                    <stop offset="1" stop-color="#8ED6C8" />
+                  </linearGradient>
+                </defs>
+                <path class="a-halo" d="M 54 150 L 100 48 L 146 150" />
+                <path class="a-halo" d="M 72 116 L 128 116" />
+                <path class="a-core" d="M 54 150 L 100 48 L 146 150" />
+                <path class="a-core" d="M 72 116 L 128 116" />
+                <path class="a-glint" d="M 54 150 L 100 48" />
+                <circle cx="100" cy="48" r="6" fill="#FFFFFF" opacity=".72" style="filter:blur(3px)" />
+                <circle cx="18" cy="62" r="3.1" fill="#7FA9EC" opacity=".55" />
+                <circle cx="18" cy="100" r="3.1" fill="#A9A4E9" opacity=".55" />
+                <circle cx="18" cy="138" r="3.1" fill="#8ED6C8" opacity=".55" />
+                <circle cx="182" cy="62" r="3.1" fill="#7FA9EC" opacity=".55" />
+                <circle cx="182" cy="100" r="3.1" fill="#A9A4E9" opacity=".55" />
+                <circle cx="182" cy="138" r="3.1" fill="#8ED6C8" opacity=".55" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- neutral functional annotations -->
+        <div class="relative z-20 mx-auto mt-1 flex w-full max-w-[880px] items-center justify-between px-1">
+          <span class="micro">IN</span>
+          <span class="micro">ROUTE</span>
+          <span class="micro">OUT</span>
+        </div>
+
+        <!-- wordmark -->
+        <div class="mt-8 flex flex-col items-center sm:mt-10">
+          <span class="h-px w-14 rounded-full" style="background:linear-gradient(90deg,#7FA9EC,#A9A4E9,#8ED6C8);opacity:.65"></span>
+          <h1 class="wordmark mt-6 text-center" style="padding-left:.135em">AgenticAPI</h1>
+        </div>
+
+        <!-- finalized primary mark, used verbatim as the visual anchor -->
+        <div class="master-wrap mt-10 flex justify-center sm:mt-12">
+          <div class="master-plate">
+            <svg class="master-fallback" viewBox="0 0 200 200" aria-hidden="true">
+              <defs>
+                <linearGradient id="aGrad2" gradientUnits="userSpaceOnUse" x1="40" y1="30" x2="165" y2="170">
+                  <stop offset="0" stop-color="#7FA9EC" />
+                  <stop offset="0.5" stop-color="#A9A4E9" />
+                  <stop offset="1" stop-color="#8ED6C8" />
+                </linearGradient>
+              </defs>
+              <path d="M 54 150 L 100 48 L 146 150" fill="none" stroke="url(#aGrad2)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity=".28" style="filter:blur(8px)" />
+              <path d="M 72 116 L 128 116" fill="none" stroke="url(#aGrad2)" stroke-width="12" stroke-linecap="round" opacity=".28" style="filter:blur(8px)" />
+              <path d="M 54 150 L 100 48 L 146 150" fill="none" stroke="url(#aGrad2)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M 72 116 L 128 116" fill="none" stroke="url(#aGrad2)" stroke-width="7" stroke-linecap="round" />
+            </svg>
+            <img src="https://miora-sign.d.gtimg.com/file/728777688281300/2026/11/06/5rs2yi86r8slxt1pv3fvq/async-task/UJbNq3VskmCaFGXi.png?sign=00ff4912a032e7b7d70838c2be6d12ef&t=1793952575" alt="AgenticAPI 主标定稿：圆角玻璃节点与三路汇聚、发散光带构成的抽象 A 标识" onerror="this.style.display='none'" />
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const hero = document.getElementById('hero');
+      if (!hero) return;
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let tx = 0, ty = 0, px = 0, py = 0, sv = 0, svTarget = 0;
+
+      hero.addEventListener('pointermove', function (e) {
+        const r = hero.getBoundingClientRect();
+        tx = (e.clientX - r.left) / r.width - 0.5;
+        ty = (e.clientY - r.top) / r.height - 0.5;
+      }, { passive: true });
+      hero.addEventListener('pointerleave', function () { tx = 0; ty = 0; });
+
+      window.addEventListener('scroll', function () {
+        svTarget = Math.min(window.scrollY || 0, 700) / 700;
+      }, { passive: true });
+
+      (function frame() {
+        px += (tx - px) * 0.055;
+        py += (ty - py) * 0.055;
+        sv += (svTarget - sv) * 0.08;
+        hero.style.setProperty('--px', (reduce ? 0 : px).toFixed(4));
+        hero.style.setProperty('--py', (reduce ? 0 : py).toFixed(4));
+        hero.style.setProperty('--scroll', (reduce ? 0 : sv).toFixed(4));
+        requestAnimationFrame(frame);
+      })();
+    })();
+  </script>
+</body>
+<script>if (window.lucide) lucide.createIcons();</script>
+</html>

@@ -1,7 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    CSS Variables — Design Tokens
    配色对齐 Arco Design（字节系企业级 SaaS / 火山引擎同源风格），仅亮色主题。
-   色值取自 Arco 默认亮色调色板，保证与组件库渲染结果完全一致。
+   2026-11 改版：接入自托管中文字体（MiSans VF）、补充密度/层次令牌、
+   收敛内容区底色与侧栏宽度，使紧凑控制台的层级更清晰。
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
@@ -18,8 +19,7 @@
   --color-accent-light: #ff9a2e;
   --color-accent-dark: #d25f00;
 
-  /* 扩展强调色（Arco 调色板中的紫 / 青 / 金 / 橘红，用于分区配色与数据可视化，
-     主操作色仍是 primary，这些色只做"标识与区分"，不承载交互语义） */
+  /* 扩展强调色（紫 / 青 / 金 / 橘红，只做标识与区分，不承载交互语义） */
   --color-violet: #722ed1;
   --color-violet-lighter: #f5e8ff;
   --color-cyan: #14c9c9;
@@ -60,27 +60,30 @@
   --color-text-disabled: var(--color-gray-400);
   --color-bg: var(--color-white);
   --color-bg-secondary: var(--color-gray-50);
-  /* 页面布局底色：控制台 / 文档等内容区背景 */
-  --color-bg-layout: var(--color-gray-100);
+  /* 页面布局底色：略偏冷亮的灰蓝，白卡浮起更清晰（原为 gray-100） */
+  --color-bg-layout: #f5f7fa;
+  --color-bg-subtle: #fafbfc;       /* 工具条 / 次级容器底 */
   --color-border: var(--color-gray-200);
   --color-border-hover: var(--color-gray-300);
+  --color-border-subtle: var(--color-gray-100);  /* 表格行分隔线 */
+  --color-row-hover: #f4f8ff;       /* 表格行悬停（极浅蓝，非整片主色） */
 
-  /* 交互态：输入类控件聚焦时的柔光焦点环（自研控件与 Arco 控件共用同一语言） */
+  /* 交互态：输入类控件聚焦时的柔光焦点环 */
   --color-focus-ring: rgba(22, 93, 255, 0.15);
   --color-focus-ring-error: rgba(245, 63, 63, 0.15);
 
-  /* ── 字体系统 ─────────────────────────────────────────────────────────── */
-  /* 三种字体角色（网络字体在 styles/index.css 顶部自托管引入）：
-     - sans   正文：拉丁用 Public Sans，中文按序回落本地黑体（HarmonyOS Sans SC
-              → MiSans → PingFang → 雅黑），拉丁字形与中文字形各自取最优；
-     - display 展示：品牌字与大标题。字体栈按字符自动分工——拉丁字母取
-              Playfair Display（高对比英文衬线），中文汉字跳过它落到
-              思源宋体 Noto Serif SC，本地再回落宋体链；中英文同为衬线、
-              气质统一，无需按语言手写 class；
-     - mono   等宽：代码、密钥、价格、统计数值，用 JetBrains Mono。 */
-  --font-sans: 'Public Sans Variable', 'Public Sans', 'HarmonyOS Sans SC', 'MiSans',
-    'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, -apple-system,
-    'Segoe UI', Arial, sans-serif;
+  /* ── 字体系统（三角色） ─────────────────────────────────────────────────
+     拉丁字形走 @fontsource-variable 自托管字体；控制台页中文统一走自托管字体，
+     按 unicode-range 分片加载，跨设备观感一致。
+     - sans    正文：Public Sans（拉丁）→ 自托管中文字体（仅控制台页）
+     - display 展示：Playfair Display（拉丁）→ 思源宋体（中文），仅首页 Hero 与品牌字
+     - mono    等宽：代码、密钥、价格、统计数值
+     首页作用域内重定义 --font-sans / --font-display，保留改版前的系统字体链。
+     CSS 按字符逐个回落：拉丁字符命中 Public Sans / Playfair，汉字落到中文字体链。 */
+  --font-sans: 'Public Sans Variable', 'Public Sans', 'MiSans VF',
+    'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Noto Sans CJK SC',
+    'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+  /* 展示字体仅用于首页 Hero 大标题与顶栏品牌字，保留改版前衬线气质 */
   --font-display: 'Playfair Display Variable', 'Playfair Display', 'Noto Serif SC',
     'Source Han Serif SC', 'Songti SC', 'SimSun', serif;
   --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace,
@@ -92,6 +95,7 @@
   --text-base: 1rem; /* 16px */
   --text-lg: 1.125rem; /* 18px */
   --text-xl: 1.25rem; /* 20px */
+  --text-page-title: 22px; /* 页面主标题（2026-11 新增，拉开与卡片标题的层级落差） */
   --text-2xl: 1.5rem; /* 24px */
   --text-3xl: 1.875rem; /* 30px */
   --text-4xl: 2.25rem; /* 36px */
@@ -125,19 +129,22 @@
   --space-20: 5rem; /* 80px */
   --space-24: 6rem; /* 96px */
 
-  /* ── 圆角（对齐 Arco：控件 2px，容器 4-8px） ──────────────────────────── */
-  --radius-sm: 2px; /* 输入框、按钮等控件 */
+  /* ── 圆角（对齐 Arco：控件 2px，容器 4-8px） ─────────────────────────── */
+  --radius-sm: 2px; /* 输入框、按钮、标签等控件 */
+  --radius-control: 2px; /* 控件圆角别名，便于全局覆写引用 */
   --radius-md: 4px; /* 小卡片、标签 */
   --radius-lg: 6px; /* 卡片、弹层 */
   --radius-xl: 8px; /* 大容器 */
   --radius-2xl: 12px; /* 营销区块 */
   --radius-full: 9999px;
 
-  /* ── 阴影（Arco 阴影规范） ────────────────────────────────────────────── */
+  /* ── 阴影 ─────────────────────────────────────────────────────────────── */
   --shadow-sm: 0 1px 2px rgba(29, 33, 41, 0.06);
   --shadow-md: 0 4px 10px rgba(31, 35, 41, 0.1);
   --shadow-lg: 0 8px 20px rgba(31, 35, 41, 0.1);
   --shadow-xl: 0 12px 32px 4px rgba(31, 35, 41, 0.1);
+  --shadow-card: 0 1px 2px rgba(29, 33, 41, 0.04), 0 1px 6px rgba(29, 33, 41, 0.03);
+  --shadow-primary: 0 1px 2px rgba(22, 93, 255, 0.18), 0 2px 6px rgba(22, 93, 255, 0.10);
 
   /* ── 过渡 ─────────────────────────────────────────────────────────────── */
   --transition-fast: 150ms ease;
@@ -152,8 +159,14 @@
   --container-2xl: 1536px;
 
   /* ── 页面骨架 ─────────────────────────────────────────────────────────── */
-  /* 顶部导航高度（App.vue 主内容区用它计算视口剩余高度） */
   --layout-header-height: 56px;
-  /* 控制台侧边栏宽度 */
-  --layout-sidebar-width: 120px;
+  --layout-sidebar-width: 176px;  /* 原 120px，菜单文字不再拥挤 */
+
+  /* ── 密度令牌（2026-11 新增，表格与控件统一从这里取值） ─────────────── */
+  --density-row-padding: 4px;     /* 表格单元格上下 padding */
+  --density-head-padding: 6px;    /* 表头上下 padding */
+  --density-cell-line: 20px;      /* 单元格行高 */
+  --control-height: 32px;
+  --control-height-sm: 28px;
+  --control-height-mini: 24px;
 }

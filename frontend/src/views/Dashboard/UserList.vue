@@ -20,7 +20,7 @@
       </div>
     </header>
 
-    <!-- 用户列表（行内编辑余额/分组/管理员/状态）：白卡容器与秘钥页统一 -->
+    <!-- 用户列表（行内编辑余额/分组/管理员/状态）：白卡容器与密钥页统一 -->
     <div class="page-card">
       <a-table
           row-key="id"
@@ -30,7 +30,7 @@
           :bordered="{wrapper: true}"
           :pagination="false"
           :row-selection="{type: 'checkbox', showCheckedAll: true, selectedRowKeys: selectedKeys}"
-          :scroll="{x: 1180}"
+          :scroll="{x: 1600}"
           :row-class="record => record.isGuest ? 'guest-row' : ''"
           @selection-change="onSelectionChange"
       >

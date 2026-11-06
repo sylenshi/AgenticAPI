@@ -73,6 +73,7 @@
           :loading="loading"
           :bordered="{wrapper: true}"
           :pagination="false"
+          :scroll="{x: 1200}"
           size="small"
           column-resizable
           :row-selection="{type: 'checkbox', showCheckedAll: true}"
@@ -144,6 +145,7 @@
           :loading="recordsLoading"
           :bordered="{wrapper: true}"
           :pagination="false"
+          :scroll="{x: 900}"
           size="small"
           column-resizable
           class="redeem-table"
@@ -529,16 +531,7 @@ onMounted(() => {
   color: var(--color-text);
 }
 
-/* 本页统计卡固定 4 张：覆盖全局 3 列网格为 4 列，避免第 4 张孤卡换行；窄屏回落 2 列 */
-.stat-cards {
-  grid-template-columns: repeat(4, 1fr);
-}
-
-@media (max-width: 900px) {
-  .stat-cards {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
+/* 统计卡列数由全局 auto-fit 栅格决定，本页不再反写 */
 
 /* 兑换输入行与记录小节的分隔 */
 .redeem-divider {
@@ -614,7 +607,7 @@ onMounted(() => {
   color: var(--color-text-muted);
 }
 
-/* 兑换码展示：mono 等宽 + 圆角灰底内衬（与秘钥页一致） */
+/* 兑换码展示：mono 等宽 + 圆角灰底内衬（与密钥页一致） */
 .redeem-page :deep(code) {
   font-family: var(--font-mono);
   font-size: 12px;

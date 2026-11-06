@@ -9,7 +9,7 @@
       </p>
     </header>
 
-    <a-spin :loading="loading" :style="{width: '100%'}">
+    <div class="settings-content">
       <!-- 监控配置 -->
       <div class="page-card settings-card">
         <h3 class="settings-card-title">监控配置</h3>
@@ -66,7 +66,7 @@
         <a-button type="primary" :loading="saving" :disabled="!hasChanges" @click="save">保存设置</a-button>
         <span v-if="!hasChanges" class="settings-tip">暂无未保存的修改</span>
       </div>
-    </a-spin>
+    </div>
   </div>
 </template>
 

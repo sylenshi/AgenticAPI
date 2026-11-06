@@ -106,8 +106,8 @@ const exampleApiKey = computed(() => userApiKey.value || 'sk-你的API密钥')
 const displayApiKey = computed(() => userApiKey.value || 'sk-未自动填入（见下方提示）')
 const apiKeyHint = computed(() => {
   if (userApiKey.value) return '已自动填入你第一个处于启用状态的 API 密钥，请注意保密。'
-  if (!userStore.isLoggedIn) return '登录后这里会自动填入你的 API 密钥（在控制台-秘钥页创建）。'
-  return '你还没有 API 密钥，到控制台-秘钥页创建后会自动填入这里。'
+  if (!userStore.isLoggedIn) return '登录后这里会自动填入你的 API 密钥（在控制台-密钥页创建）。'
+  return '你还没有 API 密钥，到控制台-密钥页创建后会自动填入这里。'
 })
 
 /** ═══════════ 调用示例生成 ═══════════ */

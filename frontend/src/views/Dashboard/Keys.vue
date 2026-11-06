@@ -1,9 +1,9 @@
-<!-- 控制台-秘钥：用户管理自己的中转 API 密钥 -->
+<!-- 控制台-密钥：用户管理自己的中转 API 密钥 -->
 
 <template>
   <div class="keys-page">
     <header class="page-head">
-      <h2>API 秘钥</h2>
+      <h2>API 密钥</h2>
       <p class="page-head-desc">
         调用中转接口时，请在请求头携带 Authorization: Bearer sk-xxx。
         接口地址为 POST {{ siteStore.chatCompletionsUrl }}（OpenAI Chat 兼容格式）。
@@ -31,6 +31,7 @@
           row-key="id"
           :bordered="{wrapper: true}"
           :pagination="false"
+          :scroll="{x: 720}"
           class="keys-table"
           column-resizable
           size="small"
@@ -42,10 +43,9 @@
           <a-typography-text code copyable>{{ record.key }}</a-typography-text>
         </template>
         <template #status="{ record }">
-          <span class="status-cell" :class="record.status ? 'is-on' : 'is-off'">
-            <span class="status-dot"/>
-            {{ record.status ? '启用' : '禁用' }}
-          </span>
+          <a-tooltip :content="record.status ? '点击禁用' : '点击启用'" position="top">
+            <a-switch size="small" :model-value="!!record.status" @change="handleToggle(record)"/>
+          </a-tooltip>
         </template>
         <template #createTime="{ record }">{{ formatTime(record.createTime) }}</template>
         <template #lastUsedTime="{ record }">
@@ -79,7 +79,7 @@ const newName = ref('')
 const creating = ref(false)
 
 const columns: TableColumnData[] = [
-  {title: 'ID', dataIndex: 'id', width: 1},
+  {title: 'ID', dataIndex: 'id', width: 64},
   {title: '备注名', dataIndex: 'name', minWidth: 100},
   {title: '密钥', slotName: 'key', minWidth: 240},
   {title: '状态', slotName: 'status', width: 90, align: 'center'},
@@ -148,7 +148,7 @@ onMounted(load)
 
 <style scoped>
 .keys-page {
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-5) var(--space-6);
 }
 
 .create-row {

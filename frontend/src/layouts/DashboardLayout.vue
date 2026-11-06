@@ -14,6 +14,7 @@
             :to="item.to"
             class="sidebar-nav-link"
             :class="{ active: isActive(item.to) }"
+            :title="item.name"
         >
           <component :is="item.icon" class="sidebar-nav-icon"/>
           <span>{{ item.name }}</span>
@@ -49,7 +50,7 @@ const isActive = (path: string) => {
 }
 
 // 按角色过滤侧边栏：
-// - 概览/秘钥/兑换：所有登录用户可见（访客与普通用户同权限，兑换页内管理区块按角色分支）
+// - 概览/密钥/兑换：所有登录用户可见（访客与普通用户同权限，兑换页内管理区块按角色分支）
 // - 渠道/运营/用户/维护Agent/设置：仅管理员可见
 const visibleDashItems = computed(() => {
   const adminPaths = ['/dashboard/channels', '/dashboard/operations', '/dashboard/userlist', '/dashboard/settings', '/dashboard/agent']
