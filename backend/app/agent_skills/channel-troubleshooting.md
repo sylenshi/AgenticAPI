@@ -11,14 +11,14 @@ triggers: 渠道故障,渠道报错,排障,打不通,上游错误
 1. **复现**：`test_channel`（先 scope=one 复现，再 scope=all 定位影响面）。
 2. **归因**：按四类逐一排查——
    - **连通性**：error 含 ConnectError/Timeout → 网络或上游宕机；
-   - **凭证**：HTTP 401/403 → 渠道密钥失效（处置：引导管理员去渠道管理页手工换密钥，Agent 不经手密钥）；
+   - **凭证**：HTTP 401/403 → 渠道密钥失效（处置：请管理员在对话中提供新密钥，用 `rotate_channel_key` 轮换，后端代持注入，密钥不落卡不落库明文）；
    - **额度**：HTTP 402/429 → 上游额度耗尽或限流，用 `get_upstream_status` 确认水位；
    - **模型映射**：仅个别模型失败而渠道其他模型正常 → 疑似 upstream_name 映射错误或渠道 support_models 配置漂移，用 `check_binding_consistency` 交叉确认。
 3. **处置建议**（按归因给出，写操作需走审批）：
    - 连通性差：建议 `update_channel` 调大 timeout（L1）或临时停用（L1）；
-   - 凭证失效：只能提示管理员手工换密钥；
+   - 凭证失效：请管理员把新密钥发到对话里，`rotate_channel_key` 轮换后立即 `test_channel` 验证（L2）；
    - 额度耗尽：建议切流到其他渠道（`update_channel` 停用该渠道）或补充额度；
-   - 映射错误：报告不一致明细，修复由管理员确认后走 A3 / 模型管理页。
+   - 映射错误：报告不一致明细，修复由管理员确认后走 A3 / `update_model`。
 
 ## 报告模板
 

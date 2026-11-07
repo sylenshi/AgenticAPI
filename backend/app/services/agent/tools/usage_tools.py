@@ -34,6 +34,7 @@ async def _collect_token_expiry() -> dict:
     import datetime as _dt
     items = []
     soon = []
+    expired = []
     for name, value in expiry.items():
         item = {"credential": name, "expiry": value}
         # 到期值可能是 "2026-10-12 03:00:00" 或 ISO 的 "2026-10-12T03:00:00"，统一按空格分隔解析
@@ -41,14 +42,25 @@ async def _collect_token_expiry() -> dict:
             expire_at = _dt.datetime.strptime(str(value)[:19].replace("T", " "), "%Y-%m-%d %H:%M:%S")
             days_left = (expire_at - _dt.datetime.now()).days
             item["daysLeft"] = days_left
-            if 0 <= days_left <= 7:
+            if days_left < 0:
+                # 已过期是最需要触发 rotate_channel_key 处置的场景，必须醒目
+                item["urgent"] = True
+                expired.append(f"{name}（已过期 {-days_left} 天）")
+            elif days_left <= 7:
                 item["urgent"] = True
                 soon.append(f"{name}（剩 {days_left} 天）")
         except (TypeError, ValueError):
             pass
         items.append(item)
 
-    summary = "全部凭证有效期充足" if not soon else f"⚠ 临期凭证：{'、'.join(soon)}"
+    if expired:
+        summary = "⚠ 已过期凭证：" + "、".join(expired)
+        if soon:
+            summary += "；⚠ 临期凭证：" + "、".join(soon)
+    elif soon:
+        summary = f"⚠ 临期凭证：{'、'.join(soon)}"
+    else:
+        summary = "全部凭证有效期充足"
     return {"credentials": items, "summary": summary}
 
 

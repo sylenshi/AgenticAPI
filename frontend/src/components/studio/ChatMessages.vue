@@ -62,7 +62,7 @@
                                 <a-button type="text" size="mini" title="复制" @click="handleCopy(msg.content)">
                                     <template #icon><icon-copy/></template>
                                 </a-button>
-                                <a-button v-if="msg.content && index === messages.length - 1 && !isStreaming"
+                                <a-button v-if="showRegenerate && msg.content && index === messages.length - 1 && !isStreaming"
                                           type="text" size="mini" title="重新生成" @click="emit('regenerate')">
                                     <template #icon><icon-refresh/></template>
                                 </a-button>
@@ -91,10 +91,12 @@ import type {studioMessage} from '@/types'
 import ToolStatusBar from '@/components/agent/ToolStatusBar.vue'
 import ApprovalCard from '@/components/agent/ApprovalCard.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     messages: studioMessage[]
     isStreaming: boolean
-}>()
+    /** 是否显示"重新生成"按钮（工坊 true；维护 Agent 页无此语义传 false，避免死按钮） */
+    showRegenerate?: boolean
+}>(), {showRegenerate: true})
 
 const emit = defineEmits<{
     regenerate: []

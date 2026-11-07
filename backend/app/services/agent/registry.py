@@ -146,6 +146,32 @@ async def _validate_required(tool: ToolDef, args: dict) -> str | None:
     return None
 
 
+# JSON Schema type → Python 类型检查（bool 是 int 子类，需显式排除以免误过 integer 校验）
+_TYPE_CHECKS = {
+    "boolean": lambda v: isinstance(v, bool),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "string": lambda v: isinstance(v, str),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, dict),
+}
+
+
+def _validate_types(tool: ToolDef, args: dict) -> str | None:
+    """按 JSON Schema 的 type 声明做类型校验，返回错误信息（None = 通过）。
+
+    防止模型不守 schema 时语义反转：如 update_channel(status="false") 字符串
+    truthy 会被当成 True——本想停用反而启用。
+    """
+    properties = tool.parameters.get("properties", {})
+    for key, value in args.items():
+        expected = (properties.get(key) or {}).get("type")
+        check = _TYPE_CHECKS.get(expected)
+        if check and value is not None and not check(value):
+            return f"参数 {key} 需要 {expected} 类型，收到 {type(value).__name__}，请修正后重试"
+    return None
+
+
 def _need_approval(mode: str, tool: ToolDef) -> bool:
     """弹卡查表：档位 × 风险等级唯一决定，无任何例外名单。未知档位按最严档处理。"""
     return {
@@ -155,10 +181,12 @@ def _need_approval(mode: str, tool: ToolDef) -> bool:
     }.get(mode, True)
 
 
-async def _run_with_gate(ctx: ToolContext, tool: ToolDef, args: dict) -> tuple[Any, bool]:
+async def _run_with_gate(ctx: ToolContext, tool: ToolDef, args: dict, state: dict) -> tuple[Any, bool]:
     """风险阀门 + 超时执行（不含参数校验与序列化）。
 
     返回 (handler 结果, 是否经过人审)。会话配额是任何档位恒生效的护栏，先于审批检查。
+    state 为调用方持有的状态容器：批准通过后置 state["approved"]=True——handler
+    后续抛异常时调用方仍能据此落 approval_status="approved"（审批轨迹不丢）。
     """
     if tool.session_limit is not None:
         used = ctx.used_counts.get(tool.name, 0)
@@ -188,8 +216,25 @@ async def _run_with_gate(ctx: ToolContext, tool: ToolDef, args: dict) -> tuple[A
                 "timeout": "审批超时（300s）自动拒绝。请重新发起并等待管理员批准。",
             }[verdict]
             raise ApprovalRejected(verdict, message)
+        state["approved"] = True
 
     return await asyncio.wait_for(tool.handler(ctx, args), timeout=tool.timeout), need_approval
+
+
+async def _audit_tool_failure(ctx: ToolContext, tool: ToolDef, args: dict, note: str,
+                              gate_state: dict) -> None:
+    """失败路径的 logs 侧留痕（双轨审计）：被拒 / 超时 / 配额拒绝 / 执行异常统一补写一条
+    admin 日志，全站审计流里能看到失败的高危操作尝试。写失败不影响工具结果回传。"""
+    try:
+        args_digest = json.dumps(redact(args), ensure_ascii=False, default=str)[:200]
+        approval_note = "已批准后" if gate_state.get("approved") else ""
+        await log_crud.write_log(
+            db=ctx.db, type="admin", action="agent_tool",
+            user_id=ctx.user.id, username=ctx.user.username,
+            detail=f"[{tool.risk}] {tool.name}({args_digest}) → 失败（{approval_note}{note}）",
+        )
+    except Exception:
+        pass
 
 
 async def execute_tool(ctx: ToolContext, name: str, arguments_raw: str) -> ToolExecution:
@@ -211,30 +256,45 @@ async def execute_tool(ctx: ToolContext, name: str, arguments_raw: str) -> ToolE
     missing = await _validate_required(tool, args)
     if missing:
         return _error(f"工具 {name}：{missing}", risk=tool.risk)
+    bad_type = _validate_types(tool, args)
+    if bad_type:
+        return _error(f"工具 {name}：{bad_type}", risk=tool.risk)
 
     approval_status = "none"
+    gate_state: dict = {}
     try:
-        result, approval_used = await _run_with_gate(ctx, tool, args)
-        if tool.session_limit is not None:
+        result, approval_used = await _run_with_gate(ctx, tool, args, gate_state)
+        if tool.session_limit is not None and args.get("dry_run") is not True:
+            # dry-run 预览不计入会话配额：两段式删除的真删口径（设计文档 2.3 示例 1/10）
             ctx.used_counts[tool.name] = ctx.used_counts.get(tool.name, 0) + 1
         if approval_used:
             approval_status = "approved"
     except ApprovalRejected as exc:
+        await _audit_tool_failure(ctx, tool, args, f"{exc.verdict}：{str(exc)[:80]}", gate_state)
         return _error(str(exc), risk=tool.risk, approval_status=exc.verdict)
     except PermissionError as exc:
-        return _error(str(exc), risk=tool.risk)
+        await _audit_tool_failure(ctx, tool, args, f"配额拒绝：{str(exc)[:80]}", gate_state)
+        return _error(str(exc), risk=tool.risk,
+                      approval_status="approved" if gate_state.get("approved") else "none")
     except asyncio.TimeoutError:
-        return _error(f"工具 {name} 执行超时（{tool.timeout}s），请缩小范围后重试（如分批测试）", risk=tool.risk)
+        await _audit_tool_failure(ctx, tool, args, f"执行超时（>{tool.timeout}s）", gate_state)
+        return _error(f"工具 {name} 执行超时（{tool.timeout}s），请缩小范围后重试（如分批测试）", risk=tool.risk,
+                      approval_status="approved" if gate_state.get("approved") else "none")
     except ValueError as exc:  # 参数语义错误：可行动反馈
-        return _error(f"工具 {name}：{exc}", risk=tool.risk)
+        await _audit_tool_failure(ctx, tool, args, f"失败：{str(exc)[:80]}", gate_state)
+        return _error(f"工具 {name}：{exc}", risk=tool.risk,
+                      approval_status="approved" if gate_state.get("approved") else "none")
     except Exception as exc:  # 兜底：未知异常也转为数据
-        return _error(f"工具 {name} 执行失败：{exc.__class__.__name__}: {exc}"[:500], risk=tool.risk)
+        await _audit_tool_failure(ctx, tool, args,
+                                  f"异常：{exc.__class__.__name__}: {str(exc)[:60]}", gate_state)
+        return _error(f"工具 {name} 执行失败：{exc.__class__.__name__}: {exc}"[:500], risk=tool.risk,
+                      approval_status="approved" if gate_state.get("approved") else "none")
 
     sanitized = redact(result if result is not None else {"ok": True})
     content = truncate_result(sanitized)
     summary = _make_summary(sanitized)
 
-    # 审计：每次工具执行写一条 admin 日志（审批拒绝的轨迹已在 agent_message 表，不重复写）
+    # 审计：每次成功的工具执行写一条 admin 日志（失败路径由 _audit_failure_note 覆盖）
     try:
         args_digest = json.dumps(redact(args), ensure_ascii=False, default=str)[:200]
         await log_crud.write_log(

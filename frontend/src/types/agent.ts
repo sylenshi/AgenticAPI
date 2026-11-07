@@ -5,7 +5,7 @@ export type agentApprovalMode = 'confirm_all' | 'confirm_critical' | 'full'
 
 /** 后端 agenticapi_agent 扩展事件（SSE 站内扩展字段的联合类型） */
 export type agentStreamEvent =
-    | { type: 'replay_start'; baseMessages: number }
+    | { type: 'replay_start'; baseMessages: number; baseLastId?: number }
     | { type: 'task_inactive' }
     | { type: 'tool_start'; tool: string; digest?: string }
     | { type: 'tool_progress'; tool: string; done: number; total: number }
@@ -13,7 +13,6 @@ export type agentStreamEvent =
     | { type: 'tool_end'; tool: string; ok: boolean; summary?: string }
     | { type: 'confirm_required'; approvalId: string; tool: string; args: Record<string, unknown>; impact: string; riskLevel: string; expiresIn: number }
     | { type: 'confirm_resolved'; approvalId: string; result: 'approved' | 'rejected' | 'timeout' }
-    | { type: 'model_switched'; from: string; to: string }
     | { type: 'round_end'; round: number; usageSoFar: { promptTokens: number; completionTokens: number }; contextTokens?: number }
     | { type: 'task_paused'; reason: 'round_limit' | 'cost_limit'; round: number }
 
@@ -40,8 +39,10 @@ export interface agentConfirmState {
     impact: string
     riskLevel: string
     status: 'pending' | 'approved' | 'rejected' | 'timeout'
-    /** 倒计时秒数（展示用） */
+    /** 倒计时秒数（展示用，事件创建时快照） */
     expiresIn?: number
+    /** 到期绝对时间戳（Date.now() + expiresIn*1000，刷新回放后仍能准确倒数） */
+    expiresAt?: number
 }
 
 /** 服务端会话 */

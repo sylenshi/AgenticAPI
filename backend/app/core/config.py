@@ -54,7 +54,8 @@ class ServerSettings(BaseSettings):
 
 
 class AgentSettings(BaseSettings):
-    """Agent 能力专用配置：直连 StepFun，不经渠道/模型表，不计费不记日志"""
+    """Agent 能力专用配置：工坊语音 / 会话标题直连 StepFun（不经渠道表、不计费）；
+    站点维护 Agent 的默认大脑走站内中转链路（经渠道/模型表解析，计费照常）"""
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE_PATH),

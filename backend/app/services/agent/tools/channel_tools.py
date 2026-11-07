@@ -174,6 +174,7 @@ async def update_channel(ctx: ToolContext, args: dict) -> dict:
         raise ValueError(f"渠道 {channel_name} 不存在")
 
     await channel_crud.update_by_name(ctx.db, channel_name, update)
+    await ctx.db.commit()  # update_by_name 不提交，显式收口（不依赖后续审计写日志隐式提交）
     return {
         "ok": True,
         "channel": channel_name,
@@ -246,7 +247,7 @@ async def _create_channel_preview(ctx: ToolContext, args: dict) -> str:
 
 
 async def create_channel(ctx: ToolContext, args: dict) -> dict:
-    """A5 新增渠道（L1 强制审批）：复用管理页 service 校验（重名 400 → ValueError）"""
+    """A5 新增渠道（L2 关键写）：复用管理页 service 校验（重名 400 → ValueError）"""
     channel_name = (args.get("channel_name") or "").strip()
     base_url = (args.get("base_url") or "").strip()
     api_key = (args.get("api_key") or "").strip()
@@ -360,6 +361,7 @@ async def rotate_channel_key(ctx: ToolContext, args: dict) -> dict:
         raise ValueError(f"渠道 {channel_name} 不存在，可用渠道名见 list_channels 结果")
 
     await channel_crud.update_by_name(ctx.db, channel_name, {"api_key": new_key})
+    await ctx.db.commit()  # update_by_name 不提交，密钥轮换是 L2 关键操作，显式收口
     return {
         "ok": True, "channel": channel_name,
         "newKeyHint": _key_hint(new_key),

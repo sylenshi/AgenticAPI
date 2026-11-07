@@ -4,7 +4,9 @@
     <div class="approval-head">
       <span class="risk-tag" :class="confirm.riskLevel.toLowerCase()">{{ riskLabel }}</span>
       <span class="approval-tool">{{ confirm.tool }}</span>
-      <span v-if="confirm.status === 'pending'" class="approval-countdown">{{ countdown }}s 后自动拒绝</span>
+      <span v-if="confirm.status === 'pending'" class="approval-countdown">
+        {{ countdown > 0 ? `${countdown}s 后自动拒绝` : '已到时，等待服务端超时处理…' }}
+      </span>
       <span v-else class="approval-verdict" :class="confirm.status">
         {{ verdictText }}
       </span>
@@ -23,10 +25,10 @@
     </div>
 
     <div v-if="confirm.status === 'pending'" class="approval-actions">
-      <a-button size="small" @click="emit('resolve', false)">拒绝</a-button>
-      <a-button size="small" type="primary"
+      <a-button size="small" :disabled="submitting || countdown <= 0" @click="onResolve(false)">拒绝</a-button>
+      <a-button size="small" type="primary" :loading="submitting" :disabled="countdown <= 0"
                 :status="confirm.riskLevel === 'L2' ? 'warning' : 'normal'"
-                @click="emit('resolve', true)">批准执行</a-button>
+                @click="onResolve(true)">批准执行</a-button>
     </div>
   </div>
 </template>
@@ -60,21 +62,31 @@ const verdictText = computed(() => ({
     pending: '',
 }[props.confirm.status] ?? ''))
 
-/** 倒计时（每秒递减；审批等待 300s 超时） */
-const countdown = ref(props.confirm.expiresIn ?? 300)
+/** 提交中：点击即置位，按钮禁用/加载防连点；状态翻转（confirm_resolved / 本地回填）后复位 */
+const submitting = ref(false)
+function onResolve(approved: boolean) {
+    if (submitting.value) return
+    submitting.value = true
+    emit('resolve', approved)
+}
+
+/** 倒计时（按事件到达时的绝对到期时间计算，每秒对表；审批等待 300s 超时） */
+const deadline = props.confirm.expiresAt ?? (Date.now() + (props.confirm.expiresIn ?? 300) * 1000)
+const countdown = ref(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)))
 let timer: number | undefined
+if (props.confirm.status === 'pending') {
+    timer = window.setInterval(() => {
+        countdown.value = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+    }, 1000)
+}
 
 watch(() => props.confirm.status, (status) => {
     if (status !== 'pending' && timer) {
         window.clearInterval(timer)
         timer = undefined
+        submitting.value = false
     }
 })
-if (props.confirm.status === 'pending') {
-    timer = window.setInterval(() => {
-        countdown.value = Math.max(0, countdown.value - 1)
-    }, 1000)
-}
 onBeforeUnmount(() => {
     if (timer) window.clearInterval(timer)
 })

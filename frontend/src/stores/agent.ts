@@ -139,6 +139,7 @@ export const useAgentStore = defineStore('agent', () => {
         pausedReason.value = null
         try {
             const res = await listAgentMessages(sessionId)
+            if (currentSessionId.value !== sessionId) return  // 等待期间已切走：过期响应直接丢弃
             messages.value = mapHistory(res.data.list)
             // 恢复上下文水位：最后一条带 prompt_tokens 的 assistant 消息 ≈ 当前上下文占用
             for (let i = res.data.list.length - 1; i >= 0; i--) {
@@ -200,8 +201,8 @@ export const useAgentStore = defineStore('agent', () => {
 
     /** ═══════════ 提交任务与事件流跟随（v0.13.0 任务解耦）═══════════ */
 
-    async function send(content: string) {
-        if (!currentSession.value || isStreaming.value || !content.trim()) return
+    async function send(content: string): Promise<boolean> {
+        if (!currentSession.value || isStreaming.value || !content.trim()) return false
         const sessionId = currentSession.value.sessionId
         const sessionTitle = currentSession.value.title
         pausedReason.value = null  // 新任务开始，撤下"继续任务"入口
@@ -217,12 +218,16 @@ export const useAgentStore = defineStore('agent', () => {
         } catch (err) {
             Message.error(getErrorMessage(err, '任务启动失败'))
             messages.value.pop()  // 回滚乐观插入的用户气泡
-            return
+            return false
         }
-        await followTask(sessionId)
+        // 任务已在服务端启动：本地置 running（会话列表标记 + 切走再切回可自动续订）
+        const session = sessions.value.find(s => s.sessionId === sessionId)
+        if (session) session.running = true
+        // 提交在途期间用户可能已切换会话：只在仍在原会话时才跟随渲染，防事件流挂错会话
+        if (currentSessionId.value === sessionId) await followTask(sessionId)
 
-        // 首次对话后自动起标题（复用工坊标题接口）
-        if (sessionTitle === '新会话' && currentSession.value) {
+        // 首次对话后自动起标题（复用工坊标题接口；同样防在途切换写错会话）
+        if (sessionTitle === '新会话' && currentSessionId.value === sessionId) {
             try {
                 const res = await studioTitle(content.trim())
                 const title = res.data?.title
@@ -231,6 +236,7 @@ export const useAgentStore = defineStore('agent', () => {
                 // 标题失败不打扰
             }
         }
+        return true
     }
 
     /**
@@ -272,9 +278,10 @@ export const useAgentStore = defineStore('agent', () => {
             return current
         }
 
-        /** 工具事件落笔前的分段：当前气泡已有正文/思维链时新开一段（同轮并行工具共用一个气泡） */
+        /** 工具事件落笔前的分段：当前气泡已有正文/思维链/审批卡时新开一段
+         *（同轮并行工具共用一个气泡；审批卡各自独占气泡，防连续审批时前卡被覆盖） */
         function ensureToolBubble(): studioMessage {
-            if (current.content || current.reasoning) current = openBubble()
+            if (current.content || current.reasoning || current.confirm) current = openBubble()
             return current
         }
 
@@ -282,10 +289,14 @@ export const useAgentStore = defineStore('agent', () => {
             if (!alive()) return
             switch (ev.type) {
                 case 'replay_start': {
-                    // baseMessages = 任务启动前已持久化的消息数；裁掉已从 DB 加载的任务期
-                    // 消息（随后由回放事件重放），-1 表示保留全部已加载历史（无任务跟随）
+                    // baseLastId = 任务启动前最后一行消息 id：srv- 气泡仅保留 id ≤ baseLastId
+                    //（UI 气泡数 ≤ 服务端行数，行数口径会截不掉任务期气泡导致重复渲染；
+                    // 本地乐观插入的非 srv 气泡保留），任务期已落库的消息随后由回放重放。
+                    // -1 仍表示保留全部已加载历史（无任务跟随）
                     if (ev.baseMessages >= 0) {
-                        messages.value = messages.value.slice(0, ev.baseMessages)
+                        const lastId = ev.baseLastId ?? Number.MAX_SAFE_INTEGER
+                        messages.value = messages.value.filter(m =>
+                            !m.id.startsWith('srv-') || Number(m.id.slice(4)) <= lastId)
                     }
                     break
                 }
@@ -335,10 +346,13 @@ export const useAgentStore = defineStore('agent', () => {
                     break
                 }
                 case 'confirm_required': {
-                    current.confirm = {
+                    const bubble = ensureToolBubble()
+                    bubble.confirm = {
                         approvalId: ev.approvalId, tool: ev.tool, args: ev.args,
                         impact: ev.impact, riskLevel: ev.riskLevel,
                         status: 'pending', expiresIn: ev.expiresIn,
+                        // 绝对到期时间：刷新回放后倒计时仍按真实剩余时间倒数
+                        expiresAt: Date.now() + ev.expiresIn * 1000,
                     }
                     break
                 }
@@ -348,12 +362,6 @@ export const useAgentStore = defineStore('agent', () => {
                             m.confirm.status = ev.result
                         }
                     }
-                    break
-                }
-                case 'model_switched': {
-                    const session = sessions.value.find(s => s.sessionId === currentSessionId.value)
-                    if (session) session.modelName = ev.to
-                    Message.info(`驱动模型已切换：${ev.from} → ${ev.to}`)
                     break
                 }
                 case 'round_end': {
@@ -376,6 +384,7 @@ export const useAgentStore = defineStore('agent', () => {
             }
         }
 
+        let endedCleanly = false
         try {
             await streamAgentEvents(sessionId, {
                 onChunk: (text) => {
@@ -400,6 +409,9 @@ export const useAgentStore = defineStore('agent', () => {
                 onError: (msg) => {
                     if (alive()) current.error = msg
                 },
+                onDone: () => {
+                    endedCleanly = true  // [DONE] 干净收尾 = 服务端任务已结束
+                },
             }, controller.signal)
         } finally {
             // 仅当本订阅仍是当前订阅时才清理状态（切换会话后旧流的收尾不得覆盖新订阅）
@@ -411,6 +423,12 @@ export const useAgentStore = defineStore('agent', () => {
                 isStreaming.value = false
                 abortController = null
                 subscribedSessionId = null
+                // 任务干净收尾才解除占用标记：断网/异常时保留 running（任务仍在服务端执行，
+                // 重新进入会话经 selectSession 自动续订），页面 busy 状态与真实占用一致
+                if (endedCleanly) {
+                    const session = sessions.value.find(s => s.sessionId === sessionId)
+                    if (session) session.running = false
+                }
             }
         }
     }
@@ -423,6 +441,8 @@ export const useAgentStore = defineStore('agent', () => {
         isStreaming.value = false
         subscribedSessionId = null
         if (sessionId != null) {
+            const session = sessions.value.find(s => s.sessionId === sessionId)
+            if (session) session.running = false
             try {
                 await stopAgentTask(sessionId)
             } catch {
@@ -431,9 +451,17 @@ export const useAgentStore = defineStore('agent', () => {
         }
     }
 
+    /** 断开事件订阅但不停止服务端任务（页面卸载时调用；重进经 selectSession 自动续订） */
+    function disconnect() {
+        abortController?.abort()
+        abortController = null
+        isStreaming.value = false
+        subscribedSessionId = null
+    }
+
     /** ═══════════ 审批 ═══════════ */
 
-    async function approve(approvalId: string, approved: boolean) {
+    async function approve(approvalId: string, approved: boolean): Promise<boolean> {
         try {
             await resolveApproval(approvalId, approved)
             // 终态由 confirm_resolved 事件回填；这里先把按钮置为不可点
@@ -442,8 +470,10 @@ export const useAgentStore = defineStore('agent', () => {
                     m.confirm.status = approved ? 'approved' : 'rejected'
                 }
             }
+            return true
         } catch (err) {
             Message.error(getErrorMessage(err, '审批提交失败'))
+            return false  // 失败不吞信号：页面据此跳过"已批准"成功提示
         }
     }
 
@@ -451,6 +481,6 @@ export const useAgentStore = defineStore('agent', () => {
         sessions, currentSessionId, messages, isStreaming, contextTokens, pausedReason,
         currentSession, currentModel,
         loadSessions, createSession, selectSession, removeSession, clearSessions, patchSession,
-        send, stop, approve,
+        send, stop, disconnect, approve,
     }
 })

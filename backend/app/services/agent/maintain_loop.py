@@ -61,8 +61,9 @@ class SessionEventBus:
     - 缓冲上限 deque(maxlen)：超长任务（如沙箱大量输出）只保最近事件，回放可能缺失最旧片段。
     """
 
-    def __init__(self, base_messages: int):
+    def __init__(self, base_messages: int, base_last_id: int = 0):
         self.base_messages = base_messages            # 任务启动前已持久化的消息数（前端裁剪历史用）
+        self.base_last_id = base_last_id              # 任务启动前最后一行消息 id（前端按 id 裁剪，行数口径防气泡合并错位）
         self.buffer: deque[bytes] = deque(maxlen=2000)
         self._queues: list[asyncio.Queue] = []
         self.finished = False
@@ -112,12 +113,34 @@ def stop_task(session_id: int) -> bool:
     return False
 
 
+async def stop_task_and_wait(session_id: int, timeout: float = 10.0) -> bool:
+    """停止会话任务并等待其退出（删除/清空会话前调用，确保不再有消息写入已删会话）。
+
+    返回是否确实停止了执行中的任务；等待超时也返回（尽力而为，不阻塞删除流程）。
+    """
+    task = _TASKS.get(session_id)
+    if not task or task.done():
+        return False
+    task.cancel()
+    try:
+        await asyncio.wait({task}, timeout=timeout)
+    except Exception:  # 等待被打断不阻塞调用方
+        pass
+    return True
+
+
 def start_task(session_id: int, user_id: int, content: str) -> None:
-    """提交后台任务（调用方已完成会话归属校验）。同会话已有任务在跑时抛 RelayError(409)。"""
+    """提交后台任务（调用方已完成会话归属校验）。同会话已有任务在跑时抛 RelayError(409)。
+
+    总线在创建任务前预注册（base=-1 表示暂保留全部），消灭"任务已提交、订阅端却
+    查不到总线而误判 task_inactive"的竞态窗口；_task_main 装配历史后回填真实裁剪线。
+    """
     existing = _TASKS.get(session_id)
     if existing and not existing.done():
         raise RelayError(409, "当前会话正在执行任务，请等待完成、点停止或切换页面后再发送")
-    _TASKS[session_id] = asyncio.create_task(_task_main(session_id, user_id, content))
+    bus = SessionEventBus(base_messages=-1)
+    _BUS[session_id] = bus
+    _TASKS[session_id] = asyncio.create_task(_task_main(session_id, user_id, content, bus))
 
 
 async def stream_events(session_id: int, bus: SessionEventBus | None) -> AsyncIterator[bytes]:
@@ -132,7 +155,8 @@ async def stream_events(session_id: int, bus: SessionEventBus | None) -> AsyncIt
     snapshot = list(bus.buffer)
     seen = {id(evt) for evt in snapshot}  # publish 把同一对象写入缓冲与队列，按身份去重
     try:
-        yield _agent_event({"type": "replay_start", "baseMessages": bus.base_messages})
+        yield _agent_event({"type": "replay_start", "baseMessages": bus.base_messages,
+                            "baseLastId": bus.base_last_id})
         for evt in snapshot:
             yield evt
         while True:
@@ -164,7 +188,8 @@ def _error_event(message: str) -> bytes:
 
 def _redact_arguments(raw: str) -> str:
     """工具调用参数脱敏（存储/回显用）：JSON 解析后 redact 再序列化，
-    解析失败原样返回。执行路径始终用原始参数——本函数只影响落库与前端展示。
+    解析失败过一遍形态掩码兜底（畸形参数常见于截断场景，残缺 JSON 里也可能嵌密钥）。
+    执行路径始终用原始参数——本函数只影响落库与前端展示。
     （防 create_channel / sandbox_exec 命令中嵌入的密钥明文扩散到
     agent_message 与后续每一轮上游请求上下文）"""
     if not raw:
@@ -174,7 +199,7 @@ def _redact_arguments(raw: str) -> str:
         if isinstance(args, dict):
             return json.dumps(redact(args), ensure_ascii=False)
     except (TypeError, ValueError):
-        pass
+        return redact(raw)
     return raw
 
 
@@ -251,25 +276,49 @@ def _extract_summary(content: str) -> str:
 def dehydrate(messages: list[dict]) -> list[dict]:
     """
     脱水（主策略，每轮 prepare 阶段执行）：距最新消息超过 DEHYDRATE_KEEP_RECENT 条的
-    tool 结果替换为占位摘要。只缩内容、不删消息——tool_call/tool_result 配对关系
-    完整保留（OpenAI 协议要求 assistant.tool_calls 后必须跟齐 tool 消息）。
+    tool 结果替换为占位摘要；窗口外的超长 tool_calls 参数同样折叠为占位（参数也占
+    上下文，大参数工具如 save_skill 草稿可达 32KB）。只缩内容、不删消息——
+    tool_call/tool_result 配对关系完整保留（OpenAI 协议要求 assistant.tool_calls
+    后必须跟齐 tool 消息，折叠只改 arguments 不动 id/type）。
     """
     cutoff = len(messages) - DEHYDRATE_KEEP_RECENT
     out: list[dict] = []
     for idx, msg in enumerate(messages):
-        if (msg.get("role") == "tool" and idx < cutoff
-                and len(msg.get("content") or "") > DEHYDRATE_MIN_CHARS):
-            placeholder = f"[工具结果已折叠] {_extract_summary(msg.get('content') or '')}"
-            out.append({**msg, "content": placeholder})
-        else:
-            out.append(msg)
+        if idx < cutoff:
+            if (msg.get("role") == "tool"
+                    and len(msg.get("content") or "") > DEHYDRATE_MIN_CHARS):
+                placeholder = f"[工具结果已折叠] {_extract_summary(msg.get('content') or '')}"
+                out.append({**msg, "content": placeholder})
+                continue
+            calls = msg.get("tool_calls")
+            if msg.get("role") == "assistant" and calls:
+                args_len = sum(len(((tc or {}).get("function") or {}).get("arguments") or "")
+                               for tc in calls)
+                if args_len > DEHYDRATE_MIN_CHARS:
+                    folded = [{**tc, "function": {**((tc or {}).get("function") or {}),
+                                                  "arguments": "[历史调用参数已折叠，如需细节请重新调用工具获取]"}}
+                              for tc in calls]
+                    out.append({**msg, "tool_calls": folded})
+                    continue
+        out.append(msg)
     return out
 
 
+def _msg_chars(messages: list[dict]) -> int:
+    """消息字符量（content + tool_calls 参数）：token 估算与压缩判断共用口径"""
+    total = 0
+    for m in messages:
+        total += len(str(m.get("content") or ""))
+        for tc in (m.get("tool_calls") or []):
+            total += len((((tc or {}).get("function") or {}).get("arguments")) or "")
+    return total
+
+
 def _estimate_tokens(messages: list[dict], last_prompt_tokens: int) -> int:
-    """token 估算（采纳 pi 计账法）：最近官方 prompt_tokens + 其后新增消息字符数/4"""
-    chars = sum(len(str(m.get("content") or "")) for m in messages)
-    return last_prompt_tokens + chars // 4
+    """token 估算（采纳 pi 计账法）：最近官方 prompt_tokens + 其后新增消息字符数/4
+    （tool_calls 参数计入字符量）。主循环只在首轮做全量估算，后续轮以
+    last_prompt_tokens 为锚、仅传入上轮 prompt 之后新增的消息。"""
+    return last_prompt_tokens + _msg_chars(messages) // 4
 
 
 def _compact_messages(messages: list[dict], context_length: int) -> list[dict]:
@@ -284,8 +333,7 @@ def _compact_messages(messages: list[dict], context_length: int) -> list[dict]:
     target_chars = int(context_length * COMPACT_TARGET_RATIO * 4)  # token→字符粗换算（1 token≈4 字符）
     folded: list[dict] = []
     for _ in range(500):  # 防御性上限，正常折叠几轮即达标
-        est_chars = sum(len(str(m.get("content") or "")) for m in msgs)
-        if est_chars <= target_chars:
+        if _msg_chars(msgs) <= target_chars:
             break
         user_positions = [i for i, m in enumerate(msgs) if m.get("role") == "user"]
         if len(user_positions) < 2:
@@ -335,35 +383,45 @@ async def repair_dangling_tool_calls(db: AsyncSession, session_id: int) -> int:
     return repaired
 
 
-async def _task_main(session_id: int, user_id: int, content: str) -> None:
+async def _task_main(session_id: int, user_id: int, content: str, bus: "SessionEventBus") -> None:
     """后台任务入口：自持 DB 会话（任务生命周期独立于请求），装配上下文后进入主循环。
 
-    任何退出路径（正常结束 / 异常 / 取消）都保证：事件总线收尾（投递结束哨兵）、
-    未决审批置拒绝——任务不再依赖任何客户端连接存活。
+    任何退出路径（正常结束 / 异常 / 取消 / 会话已删除）都保证：事件总线收尾
+    （finish 幂等，投递结束哨兵）、未决审批置拒绝、_TASKS / _BUS 托管条目清理
+    （异常任务的 traceback 会钉住整段会话历史，不清理则内存滞留）。
     """
-    bus: SessionEventBus | None = None
+    task = asyncio.current_task()
     try:
         async with asyncSessionLocal() as db:
             session = await agent_crud.get_session(db, session_id)
             user = await db.get(UserTabel, user_id)
             if session is None or user is None:
-                return  # 会话/用户在任务排队期间被删除，静默退出
+                return  # 会话/用户在任务排队期间被删除，静默退出（finally 统一收尾）
 
             # ── ① queue：修复中断历史 + 落库用户消息 + 装配历史 ──
             await repair_dangling_tool_calls(db, session_id)
-            await agent_crud.insert_message(db, session_id=session_id, role="user", content=content)
+            # 用户消息落库用脱敏版（库里/导出不留密钥明文）；LLM 上下文回填原文
+            #（密钥轮换等场景模型需要读到管理员提供的明文钥，执行侧语义与 tool_calls 一致）
+            await agent_crud.insert_message(db, session_id=session_id, role="user",
+                                            content=redact(content))
             history: list[dict] = await agent_crud.list_messages(db, session_id)
+            if history and history[-1]["role"] == "user":
+                history[-1]["content"] = content
 
             session_dict = {
                 "id": session_id,
                 "model_name": session.model_name,
                 "approval_mode": agent_crud.resolve_approval_mode(session),
             }
-            # 任务启动前已持久化的消息数（含本条用户消息）：订阅流回放时前端据此裁剪历史避免重复渲染
-            bus = SessionEventBus(base_messages=len(history))
-            _BUS[session_id] = bus
+            # 任务启动前已持久化的消息裁剪线（行数 + 末行 id）：订阅流回放时前端据此
+            # 裁掉已从 DB 加载的任务期消息避免重复渲染（id 口径不受气泡合并影响）
+            bus.base_messages = len(history)
+            bus.base_last_id = history[-1]["id"] if history else 0
 
             async def emit(event: dict) -> None:
+                if event.get("type") == "sandbox_output" and isinstance(event.get("chunk"), str):
+                    # 沙箱实时输出过脱敏再进总线（回放缓冲/订阅者的唯一入口，密钥闭环不留破口）
+                    event = {**event, "chunk": redact(event["chunk"])}
                 bus.publish(_agent_event(event))
 
             ctx = ToolContext(db=db, user=user, session=session_dict, emit=emit)
@@ -380,12 +438,16 @@ async def _task_main(session_id: int, user_id: int, content: str) -> None:
                 await _execute(db, session_dict, user, content, history, ctx, bus)
             except Exception as exc:
                 bus.publish(_error_event(f"任务异常终止：{exc.__class__.__name__}: {exc}"))
-            finally:
-                bus.finish()
-                approval_manager.fail_all_in_session(session_id)
     except asyncio.CancelledError:
-        # 停止端点 / 服务停机取消：内层 finally 已完成总线收尾与审批清理，这里只放行取消
+        # 停止端点 / 服务停机取消：下面 finally 完成总线收尾与审批清理，这里只放行取消
         raise
+    finally:
+        bus.finish()  # 幂等：投递结束哨兵并清空回放缓冲
+        approval_manager.fail_all_in_session(session_id)
+        if _TASKS.get(session_id) is task:
+            _TASKS.pop(session_id, None)
+        if _BUS.get(session_id) is bus:
+            _BUS.pop(session_id, None)
 
 
 async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, content: str,
@@ -399,6 +461,7 @@ async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, conten
 
     usage_total = {"prompt": 0, "completion": 0}
     last_prompt_tokens = 0
+    pending_msgs: list[dict] = []        # 上轮 prompt 之后新增的消息（token 估算增量，锚点更新后清空）
     epoch_model: dict | None = None      # 当前模型纪元（模型配置 dict）
     epoch_channels: list[str] = []
     channel: dict | None = None          # 续轮优先复用的当前渠道（失败才换）
@@ -411,6 +474,14 @@ async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, conten
         while True:
             round_no += 1
             force_final = False
+
+            # ── 每轮重读会话行：管理员可在任务运行中切换模型 / 审批档位（下一轮生效）──
+            fresh = await agent_crud.get_session(db, session_id)
+            if fresh is None:
+                bus.publish(_error_event("会话已被删除，任务终止"))
+                break
+            session_dict["model_name"] = fresh.model_name
+            session_dict["approval_mode"] = agent_crud.resolve_approval_mode(fresh)
 
             # ── 轮次与成本护栏 ──
             if round_no > MAX_TOOL_ROUNDS:
@@ -438,10 +509,12 @@ async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, conten
                     bus.publish(_error_event(f"模型解析失败：{exc.message}"))
                     break
                 channel = None  # 新纪元重新选渠道
+                tools_degraded = False  # 新模型重新探测工具支持（旧纪元的降级结论不延续）
 
             llm_messages = _history_to_llm(history)
             for notice in notices:
                 llm_messages.append({"role": "user", "content": notice})
+                pending_msgs.append({"role": "user", "content": notice})
             notices = []  # 提示只注入一次，避免后续轮次重复携带
             llm_messages = dehydrate(llm_messages)
             llm_messages.insert(0, {"role": "system", "content": build_system_prompt(session_dict)})
@@ -459,9 +532,15 @@ async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, conten
             if include_tools:
                 body["tools"] = include_tools
 
-            # 上下文超窗保护：脱水后估算仍超 context_length×70% 时压缩兜底
+            # 上下文超窗保护：估算 = 最近一轮官方 prompt_tokens（锚点，已含全部历史与 schema）
+            #   + 其后新增内容字符（output / tool 结果 / 插话，tool_calls 参数计入）÷ 4；
+            # 首轮锚点为 0、对装配后的消息全量估算。脱水后估算仍超 context_length×70% 时压缩兜底
             context_length = int(epoch_model.get("context_length") or 128_000)
-            if _estimate_tokens(llm_messages, last_prompt_tokens) > context_length * COMPACT_TRIGGER_RATIO:
+            if last_prompt_tokens:
+                est_tokens = last_prompt_tokens + _msg_chars(pending_msgs) // 4
+            else:
+                est_tokens = _estimate_tokens(llm_messages, 0)
+            if est_tokens > context_length * COMPACT_TRIGGER_RATIO:
                 llm_messages = _compact_messages(llm_messages, context_length)
                 body["messages"] = llm_messages
 
@@ -492,6 +571,7 @@ async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, conten
             usage_total["prompt"] += round_usage["prompt"]
             usage_total["completion"] += round_usage["completion"]
             last_prompt_tokens = round_usage["prompt"] or last_prompt_tokens
+            pending_msgs = []  # 锚点已更新至本轮 prompt，之后的输出/工具结果作为新增量重新累计
 
             # 任务成本累计（与 _finalize_call 同口径，护栏用；实际扣费仍由 _finalize_call 完成）
             try:
@@ -537,9 +617,11 @@ async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, conten
                 content=parts["output"], tool_calls=assistant_tool_calls or None,
                 prompt_tokens=round_usage["prompt"], completion_tokens=round_usage["completion"],
             )
-            history.append({"role": "assistant", "content": parts["output"],
-                            "tool_calls": assistant_tool_calls or None,
-                            "_encrypted": st["encrypted"] or None})
+            assistant_msg = {"role": "assistant", "content": parts["output"],
+                             "tool_calls": assistant_tool_calls or None,
+                             "_encrypted": st["encrypted"] or None}
+            history.append(assistant_msg)
+            pending_msgs.append(assistant_msg)
 
             bus.publish(_agent_event({"type": "round_end", "round": round_no,
                                       "usageSoFar": {"promptTokens": usage_total["prompt"],
@@ -575,11 +657,13 @@ async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, conten
 
                 await agent_crud.insert_message(
                     db, session_id=session_id, role="tool", content=execution.content,
-                    tool_call_id=call_id, tool_name=tool_name or None,
+                    tool_call_id=call_id, tool_name=(tool_name or "")[:64] or None,
                     risk_level=execution.risk,
                     approval_status=execution.approval_status,
                 )
-                history.append({"role": "tool", "tool_call_id": call_id, "content": execution.content})
+                tool_msg = {"role": "tool", "tool_call_id": call_id, "content": execution.content}
+                history.append(tool_msg)
+                pending_msgs.append(tool_msg)
 
             if force_final:
                 break
@@ -605,8 +689,10 @@ async def _open_round(db: AsyncSession, model: dict, channel_names: list[str],
 
     - prefer_name 非空时优先复用该渠道（网络异常同渠道重试一次），仍失败按轮询
       顺序遍历其余渠道（failover）——长任务不再因单渠道一次抖动而中断；
-    - 400/422 且请求带 tools 时剥 tools 降级重试（不支持函数工具的模型退化为
-      纯对话；剥除对 body 生效，调用方据 "tools" not in body 感知降级）。
+    - 400/422 且请求带 tools 时先试探性剥 tools 同渠道重试：仅当剥除后立刻成功
+      才确认"模型/渠道不支持函数工具"（调用方据 "tools" not in body 感知降级）；
+      剥除后仍失败则还原 tools 再试下一渠道——400/422 也可能是超窗或参数被拒，
+      不能让单渠道一次拒绝把整个任务误降级为纯对话。
 
     返回 (channel, resp, client, error)——error 非空表示所有渠道失败。
     """
@@ -623,6 +709,7 @@ async def _open_round(db: AsyncSession, model: dict, channel_names: list[str],
             continue
         headers = {"Authorization": f"Bearer {channel['api_key']}"}
         timeout = httpx.Timeout(channel.get("timeout") or 30)
+        popped_tools: dict | None = None  # 本渠道试探性剥除的 tools（失败还原用）
         for _attempt in range(2):  # 同渠道最多两次（网络抖动重试）；换渠道不重试
             client = httpx.AsyncClient(timeout=timeout)
             try:
@@ -638,7 +725,7 @@ async def _open_round(db: AsyncSession, model: dict, channel_names: list[str],
                 detail = (await resp.aread())[:200]
                 await resp.aclose()
                 await client.aclose()
-                body.pop("tools", None)  # 降级：剥掉工具（对 body 生效，续轮不再注入）
+                popped_tools = body.pop("tools")  # 试探性剥除，同渠道重试
                 print(f"[maintain-agent] 渠道 {channel['channel_name']} 对 tools 返回 {resp.status_code}：{detail!r}")
                 continue
             if resp.status_code != 200:
@@ -648,6 +735,8 @@ async def _open_round(db: AsyncSession, model: dict, channel_names: list[str],
                 last_error = f"渠道 {channel['channel_name']} 返回 {resp.status_code}：{detail.decode('utf-8', 'ignore')}"
                 break  # 换下一个渠道
             return channel, resp, client, None
+        if popped_tools is not None and "tools" not in body:
+            body["tools"] = popped_tools  # 还原：剥除后仍未成功，降级结论不随本渠道失效而成立
     return None, None, None, last_error
 
 

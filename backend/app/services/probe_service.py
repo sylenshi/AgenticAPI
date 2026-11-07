@@ -115,9 +115,9 @@ async def probe_channel(db: AsyncSession, channel_name: str, model_names: list[s
     """
     channel = await channel_crud.get_by_name(db, channel_name)
     if not channel:
-        return {"isError": True, "message": f"渠道 {channel_name} 不存在"}
+        raise ValueError(f"渠道 {channel_name} 不存在")
     if not channel.get("status"):
-        return {"isError": True, "message": f"渠道 {channel_name} 已停用，请先启用再测试"}
+        raise ValueError(f"渠道 {channel_name} 已停用，请先启用再测试")
 
     if not model_names:
         import json
@@ -126,7 +126,7 @@ async def probe_channel(db: AsyncSession, channel_name: str, model_names: list[s
         except (TypeError, ValueError):
             model_names = []
     if not model_names:
-        return {"isError": True, "message": f"渠道 {channel_name} 未配置支持模型"}
+        raise ValueError(f"渠道 {channel_name} 未配置支持模型")
 
     # 站内模型名 → 上游名映射（与中转链路同规则：upstream_name 优先）
     upstream_names: dict[str, str] = {}

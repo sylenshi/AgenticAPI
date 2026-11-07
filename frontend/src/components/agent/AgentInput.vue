@@ -60,12 +60,20 @@ function handleCompositionEnd() {
 function trySend() {
   if (!canSend.value) return
   emit('send', text.value)
+  // 清空由父组件在发送确认成功（任务已在服务端启动）后调用 clear()：
+  // 409 / 网络失败时保留输入原文，长指令无需重打
+}
+
+/** 清空输入并复位高度（父组件在 send 成功后调用） */
+function clear() {
   text.value = ''
   requestAnimationFrame(() => {
     const el = textareaRef.value
     if (el) el.style.height = 'auto'
   })
 }
+
+defineExpose({clear})
 </script>
 
 <style scoped>

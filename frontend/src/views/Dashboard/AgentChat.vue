@@ -28,7 +28,8 @@
 
         <!-- 有会话但还没有消息：给引导空态，会话区不再整块留白 -->
         <ChatMessages v-if="agentStore.messages.length" :messages="agentStore.messages"
-                      :is-streaming="agentStore.isStreaming" @approve-tool="onApprove"/>
+                      :is-streaming="agentStore.isStreaming" :show-regenerate="false"
+                      @approve-tool="onApprove"/>
         <div v-else class="chat-empty chat-empty-session">
           <icon-robot class="empty-icon"/>
           <h3>新会话已就绪</h3>
@@ -41,8 +42,8 @@
           </span>
           <a-button type="primary" size="small" @click="continueTask">继续任务</a-button>
         </div>
-        <AgentInput :is-streaming="busy"
-                    @send="(text) => agentStore.send(text)" @stop="agentStore.stop()"/>
+        <AgentInput ref="inputRef" :is-streaming="busy"
+                    @send="onSend" @stop="agentStore.stop()"/>
       </template>
 
       <!-- 无会话时的空态引导 -->
@@ -75,6 +76,7 @@
             <div v-for="s in agentStore.sessions" :key="s.sessionId"
                  class="session-item" :class="{active: s.sessionId === agentStore.currentSessionId}"
                  @click="agentStore.selectSession(s.sessionId)">
+              <span v-if="s.running" class="running-dot" title="任务执行中"></span>
               <div class="session-title">{{ s.title }}</div>
               <button class="session-delete" title="删除会话"
                       @click.stop="confirmRemove(s.sessionId)">×</button>
@@ -136,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import {Message} from '@arco-design/web-vue'
 import MarkdownIt from 'markdown-it'
 import ChatMessages from '@/components/studio/ChatMessages.vue'
@@ -155,6 +157,8 @@ const exporting = ref(false)
 /** 使用提示 / 安全提示弹窗开关 */
 const usageVisible = ref(false)
 const safetyVisible = ref(false)
+/** 输入框组件引用（发送确认成功后才清空输入，失败保留便于重试） */
+const inputRef = ref<InstanceType<typeof AgentInput>>()
 
 // 帮助弹窗内容（markdown）：html:false 转义原文标签防 XSS，与工坊消息渲染同一配置
 const md = new MarkdownIt({breaks: true})
@@ -250,34 +254,44 @@ onMounted(async () => {
   loading.value = false
 })
 
+// 离开页面只断开事件订阅，服务端任务继续跑；重进经 running 标记自动续订
+onBeforeUnmount(() => {
+  agentStore.disconnect()
+})
+
+/** 发送：send 返回 true（任务已在服务端启动）才清空输入框，失败保留原文便于重试 */
+async function onSend(text: string) {
+  const ok = await agentStore.send(text)
+  if (ok) inputRef.value?.clear()
+}
+
 async function onApprove(payload: { approvalId: string; approved: boolean }) {
-  await agentStore.approve(payload.approvalId, payload.approved)
+  const ok = await agentStore.approve(payload.approvalId, payload.approved)
+  if (!ok) return  // 提交失败时 store 已弹错误提示，这里不再误报成功
   Message[payload.approved ? 'success' : 'info'](
       payload.approved ? '已批准，工具继续执行' : '已拒绝本次操作')
 }
 
 async function confirmRemove(sessionId: number) {
-    // 任务占用中的会话禁止删除：服务端任务会继续往已删除的会话 id 写消息（表无外键拦不住），留下孤儿数据
-    if (busy.value && sessionId === agentStore.currentSessionId) {
-        Message.warning('当前会话有任务在执行，请先停止再删除')
-        return
-    }
-  const ok = await confirmDialog('删除该会话将联动删除全部消息记录，不可恢复。', '删除会话', '删除', true)
+  // 后端删除前会先停止执行中的任务（防孤儿消息）；running 时在弹窗文案中明确提示
+  const target = agentStore.sessions.find(s => s.sessionId === sessionId)
+  const runningNote = target?.running ? '（该会话的执行中任务将被自动停止）' : ''
+  const ok = await confirmDialog(
+      `删除该会话将联动删除全部消息记录${runningNote}，不可恢复。`, '删除会话', '删除', true)
   if (ok) agentStore.removeSession(sessionId)
 }
 
-/** 一键清空：任务占用中禁用（任务回写目标会话会被删掉），空列表无可清项 */
+/** 一键清空：任一会话有任务在执行时，弹窗文案注明任务将被自动停止 */
 async function confirmClear() {
-    if (busy.value) {
-        Message.warning('当前会话有任务在执行，请先停止再清空')
-        return
-    }
   if (!agentStore.sessions.length) {
     Message.info('当前没有可清空的会话')
     return
   }
+  const runningCount = agentStore.sessions.filter(s => s.running).length
   const ok = await confirmDialog(
-      `将删除全部 ${agentStore.sessions.length} 个会话及所有消息记录，不可恢复。`, '清空会话', '清空', true)
+      `将删除全部 ${agentStore.sessions.length} 个会话及所有消息记录`
+      + (runningCount ? `（${runningCount} 个执行中任务将被自动停止）` : '')
+      + '，不可恢复。', '清空会话', '清空', true)
   if (ok) await agentStore.clearSessions()
 }
 
@@ -353,6 +367,22 @@ async function exportSession() {
   background: var(--color-white);
   cursor: pointer;
   transition: all var(--transition-fast);
+}
+
+/* 会话列表项的任务执行中标记（running） */
+.running-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  flex-shrink: 0;
+  margin-right: 5px;
+  animation: running-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes running-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .session-item:hover {

@@ -65,7 +65,8 @@ class ApprovalManager:
         try:
             await asyncio.wait_for(pending.event.wait(), timeout=APPROVAL_TIMEOUT_SECONDS)
         except asyncio.TimeoutError:
-            pending.result = "timeout"
+            if pending.result is None:  # 竞态保护：决议恰在超时触达时，以先到者为准
+                pending.result = "timeout"
         self._pending.pop(pending.id, None)
         return pending.result or "timeout"
 
@@ -73,11 +74,16 @@ class ApprovalManager:
         """
         处理审批决议，返回结果状态；无权/不存在返回 None。
 
+        幂等：已决议的审批返回既有结果（首个写入者胜出）——防超时触达与批准
+        互相覆盖，也天然防重复点击；重复决议不会改写已定的结果。
+
         :param user_id: 当前操作的管理员 id，必须与审批归属一致（防伪）
         """
         pending = self._pending.get(approval_id)
         if not pending or pending.user_id != user_id:
             return None
+        if pending.result is not None:
+            return pending.result
         pending.result = "approved" if approved else "rejected"
         pending.event.set()
         return pending.result

@@ -89,8 +89,10 @@ async def list_sessions(db: AsyncSession = Depends(get_db), admin=Depends(get_cu
 @router.get("/sessions/{session_id}/messages")
 async def list_messages(session_id: int, db: AsyncSession = Depends(get_db),
                         admin=Depends(get_current_admin)):
-    """会话消息（含工具与审批轨迹，历史回放用）"""
+    """会话消息（含工具与审批轨迹，历史回放用）。加载前先补占位修复中断历史
+    （进程中断 / 手动停止留下的无结果 tool_calls），与设计文档 4.3 口径一致。"""
     await _get_own_session(db, session_id, admin)
+    await maintain_loop.repair_dangling_tool_calls(db, session_id)
     rows = await agent_crud.list_messages(db, session_id)
     return success_response(message="ok", data={"list": [
         {"id": r["id"], "role": r["role"], "content": r["content"],
@@ -196,18 +198,25 @@ async def update_session(session_id: int, body: AgentSessionUpdateSchema,
 @router.delete("/sessions/{session_id}")
 async def delete_session(session_id: int, db: AsyncSession = Depends(get_db),
                          admin=Depends(get_current_admin)):
-    """删除会话（联动删除消息）"""
+    """删除会话（联动删除消息）。删除前先停止该会话执行中的任务并等待退出，
+    防止任务继续向已删会话 id 写入孤儿消息、继续扣费或执行已批准的高危操作。"""
     await _get_own_session(db, session_id, admin)
+    stopped = await maintain_loop.stop_task_and_wait(session_id)
     removed_messages = await agent_crud.delete_session(db, session_id)
     await log_crud.write_log(
         db, type="admin", action="agent_session_delete", user_id=admin.id, username=admin.username,
-        detail=f"删除维护Agent会话 {session_id}（联动删除消息 {removed_messages} 条）")
+        detail=f"删除维护Agent会话 {session_id}（联动删除消息 {removed_messages} 条"
+               + ("；已停止执行中的任务" if stopped else "") + "）")
     return success_response(message="会话已删除", data={"removedMessages": removed_messages})
 
 
 @router.delete("/sessions")
 async def clear_sessions(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
-    """一键清空当前管理员的全部会话（联动删除消息，单事务，写审计日志）"""
+    """一键清空当前管理员的全部会话（联动删除消息，单事务，写审计日志）。
+    清空前先停止该用户所有执行中的任务并等待退出（同 delete 的防孤儿逻辑）。"""
+    session_ids = [s["id"] for s in await agent_crud.list_sessions(db, admin.id)]
+    for sid in session_ids:
+        await maintain_loop.stop_task_and_wait(sid)
     ses_count, msg_count = await agent_crud.delete_all_sessions(db, admin.id, username=admin.username)
     return success_response(message="会话已清空",
                             data={"removedSessions": ses_count, "removedMessages": msg_count})

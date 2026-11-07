@@ -98,7 +98,8 @@ async def count_tool_executions(db: AsyncSession, session_id: int) -> dict[str, 
 
     返回 dict：tool_name → 次数；另有特殊键 "_legacy_l2" 承接 tool_name 列上线前的
     旧 L2 记录（彼时只有 delete_channel / delete_model 两工具，由调用方并入二者计数）。
-    成功口径 = 非 isError 结果（isError 结果由异常路径产生，不会到达配额累加）。
+    成功口径 = 非 isError 且非 dry-run 预览的结果（dry-run 是两段式删除的预览阶段，
+    不计入配额，真删才计数；isError 结果由异常路径产生，不会到达配额累加）。
     """
     result = await db.execute(
         text("""
@@ -109,6 +110,7 @@ async def count_tool_executions(db: AsyncSession, session_id: int) -> dict[str, 
             WHERE session_id = :sid AND role = 'tool'
               AND (tool_name IS NOT NULL OR (risk_level = 'L2' AND approval_status = 'approved'))
               AND content NOT LIKE '%"isError": true%'
+              AND content NOT LIKE '%"dryRun": true%'
             GROUP BY tool_key
         """),
         {"sid": session_id},
@@ -147,12 +149,16 @@ async def create_session(db: AsyncSession, *, user_id: int, model_name: str,
 
 
 async def update_session(db: AsyncSession, session_id: int, update_dict: dict) -> None:
-    """按会话 id 动态更新字段（标题 / 模型 / 开关）"""
+    """按会话 id 动态更新字段（标题 / 模型 / 开关）。
+
+    原生 SQL 不触发 ORM 的 onupdate，且 DDL 无 ON UPDATE 子句——显式刷新 update_time，
+    保证会话列表的 updateTime 不失真。
+    """
     if not update_dict:
         return
     set_clause = ", ".join(f"{k} = :{k}" for k in update_dict)
     await db.execute(
-        text(f"UPDATE agent_session SET {set_clause} WHERE id = :sid"),
+        text(f"UPDATE agent_session SET {set_clause}, update_time = CURRENT_TIMESTAMP WHERE id = :sid"),
         {**update_dict, "sid": session_id},
     )
     await db.commit()
@@ -199,8 +205,15 @@ async def gc_sessions(db: AsyncSession, user_id: int, *, username: str) -> int:
 
     规则：create_time 早于 30 天前的会话删除；剩余会话只保留最近 50 个。
     先例：访客账号惰性清理——不引入后台定时任务，新建会话时顺带执行。
+    另顺带清理孤儿消息（agent_message 无外键，会话删除与任务停止之间的竞态
+    可能留下无主消息行）。
     """
     cutoff = datetime.now() - timedelta(days=SESSION_KEEP_DAYS)
+    # 孤儿消息先行清理：与本次会话清理共用同一事务
+    orphan_result = await db.execute(text(
+        "DELETE FROM agent_message WHERE session_id NOT IN (SELECT id FROM agent_session)"))
+    orphan_count = orphan_result.rowcount or 0
+
     result = await db.execute(
         text("""
             SELECT id FROM agent_session
@@ -215,6 +228,12 @@ async def gc_sessions(db: AsyncSession, user_id: int, *, username: str) -> int:
     )
     dead_ids = [r["id"] for r in result.mappings().all()]
     if not dead_ids:
+        if orphan_count:
+            await db.commit()
+            await log_crud.write_log(
+                db, type="admin", action="agent_session_gc", user_id=user_id, username=username,
+                detail=f"清理孤儿维护Agent消息 {orphan_count} 条",
+            )
         return 0
 
     placeholders = ",".join(str(i) for i in dead_ids)
@@ -227,6 +246,7 @@ async def gc_sessions(db: AsyncSession, user_id: int, *, username: str) -> int:
 
     await log_crud.write_log(
         db, type="admin", action="agent_session_gc", user_id=user_id, username=username,
-        detail=f"惰性清理过期/超限维护Agent会话 {len(dead_ids)} 个（联动删除消息 {msg_count} 条）",
+        detail=f"惰性清理过期/超限维护Agent会话 {len(dead_ids)} 个"
+               f"（联动删除消息 {msg_count} 条、孤儿消息 {orphan_count} 条）",
     )
     return len(dead_ids)

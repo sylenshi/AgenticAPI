@@ -55,6 +55,20 @@ def _mask_value(value: str) -> str:
     return f"{value[:3]}****{value[-4:]}" if value[:3].isascii() else f"****{value[-4:]}"
 
 
+def _is_bearer_like(token: str) -> bool:
+    """Bearer 后的 token 段是否形似凭证：含数字，或长度 ≥24。
+    纯英文短词（如说明性文本 "Bearer authentication"）不是凭证，避免误伤。"""
+    return any(ch.isdigit() for ch in token) or len(token) >= 24
+
+
+def _mask_substring_match(match: re.Match) -> str:
+    """子串级掩码。Bearer 分支加判别：token 段无数字且长度 <24 的纯英文词不是凭证。"""
+    text = match.group(0)
+    if text.startswith("Bearer") and not _is_bearer_like(text[6:].strip()):
+        return text
+    return _mask_value(text)
+
+
 def redact(data):
     """
     递归脱敏：dict 按键名匹配，list/tuple 逐项下钻，字符串按密钥形态匹配。
@@ -78,11 +92,13 @@ def redact(data):
     if isinstance(data, str):
         stripped = data.strip()
         if _SECRET_VALUE_RE.match(stripped):
-            return _mask_value(stripped)
+            # 整串命中：Bearer 分支同样过判别（纯英文短词不掩码），sk-/长随机串维持高置信
+            if not (stripped.startswith("Bearer") and not _is_bearer_like(stripped[6:].strip())):
+                return _mask_value(stripped)
         if _MYSQL_URI_RE.search(data):
             data = _MYSQL_URI_RE.sub(lambda m: f"{m.group(1)}****{m.group(3)}", data)
         if _SECRET_SUB_RE.search(data):
-            return _SECRET_SUB_RE.sub(lambda m: _mask_value(m.group(0)), data)
+            return _SECRET_SUB_RE.sub(_mask_substring_match, data)
         return data
     return data
 

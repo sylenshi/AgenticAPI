@@ -1,8 +1,9 @@
 """工具域聚合：import 即触发全部注册（registry 框架不反向依赖本包，无循环导入）
-23 个工具（渠道 6 / 上游 1 / 模型 6 / 运营 3 / 技能 4 / 沙箱 2 / 搜索 1）；
-风险分布 L0 只读 ×14 ｜ L1 可逆写 ×3（update_channel / update_model / save_skill）
-｜ L2 关键写 ×6（create_channel / create_model / delete_channel / delete_model /
-delete_skill / sandbox_exec，delete 类与沙箱带会话配额）。
+25 个工具（渠道 8 / 上游 1 / 模型 6 / 运营 3 / 技能 4 / 沙箱 2 / 搜索 1）；
+风险分布 L0 只读 ×15 ｜ L1 可逆写 ×3（update_channel / update_model / save_skill）
+｜ L2 关键写 ×7（create_channel / create_model / delete_channel / delete_model /
+delete_skill / rotate_channel_key / sandbox_exec，delete 类与沙箱带会话配额，
+删除类两段式的 dry-run 预览不计入配额）。
 会话域不再有独立工具（模型切换走前端选择器），数据治理域仅保留巡检用的 _table_stats 内部函数（data_tools.py）。
 """
 

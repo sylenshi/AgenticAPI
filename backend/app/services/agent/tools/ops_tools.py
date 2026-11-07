@@ -62,8 +62,14 @@ async def get_usage_trend(ctx: ToolContext, args: dict) -> dict:
     granularity = args.get("granularity") or "day"
     if granularity not in stats_crud.GRANULARITIES:
         raise ValueError(f"granularity 仅支持 {'/'.join(stats_crud.GRANULARITIES)}，收到：{granularity}")
+    try:
+        days = int(args.get("days", 7))
+    except (TypeError, ValueError):
+        raise ValueError(f"days 需为整数，收到：{args.get('days')!r}")
+    if not 1 <= days <= 365:
+        raise ValueError("days 需在 1~365 之间，请缩小查询范围后重试")
     end = datetime.now()
-    start = end - timedelta(days=args.get("days", 7))
+    start = end - timedelta(days=days)
     if start >= end:
         raise ValueError("时间范围无效：start 必须早于 end")
 
@@ -147,9 +153,7 @@ async def generate_health_report(ctx: ToolContext, args: dict) -> dict:
         "models": {"total": len(model_results), "ok": m_ok, "fail": len(model_results) - m_ok,
                    "avgLatencyMs": avg_latency,
                    "failures": [r for r in model_results if not r.get("ok")]},
-        "upstreamUsage": {k: ops.get(k) for k in
-                          ("vol_usage", "stepfun_usage", "zai_usage", "zai2_usage", "cc_usage",
-                           "antigravity_usage")},
+        "upstreamUsage": {k: v for k, v in ops.items() if k.endswith("_usage")},
         "tokenExpiry": ops.get("token_expiry"),
         "storage": {"chatRecord": {"rows": chat_stats["rows"], "size": chat_stats["sizeText"]},
                     "logs": {"rows": log_stats["rows"], "size": log_stats["sizeText"]}},
@@ -169,7 +173,7 @@ def register_ops_tools() -> None:
         name="get_usage_trend",
         description="用量趋势（全站口径，小时桶预聚合）：按粒度统计每模型调用量/token，返回 Top5 模型摘要与明细序列。",
         parameters={"type": "object", "properties": {
-            "days": {"type": "integer", "description": "最近 N 天（默认 7）"},
+            "days": {"type": "integer", "description": "最近 N 天（默认 7，1~365）"},
             "granularity": {"type": "string", "enum": ["hour", "day", "week", "month"], "description": "粒度，默认 day"},
         }, "required": []},
         risk="L0", handler=get_usage_trend, timeout=60,

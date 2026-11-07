@@ -124,7 +124,7 @@ async def _create_model_preview(ctx: ToolContext, args: dict) -> str:
 
 
 async def create_model(ctx: ToolContext, args: dict) -> dict:
-    """C4 新增出站模型（L1 强制审批）：新上游上线入口，定价直接决定计费所以必须人审"""
+    """C4 新增出站模型（L2 关键写）：新上游上线入口，定价直接决定计费所以必须人审"""
     name = (args.get("name") or "").strip()
     group = (args.get("model_group") or "").strip()
     channels = args.get("channels")
@@ -134,6 +134,16 @@ async def create_model(ctx: ToolContext, args: dict) -> dict:
         raise ValueError(f"model_group 仅支持 free / vip，收到：{group}")
     if not isinstance(channels, list) or not channels or not all(isinstance(c, str) and c.strip() for c in channels):
         raise ValueError("channels 必须为非空字符串数组（模型至少绑定一个渠道，否则不可调用）")
+    if args.get("is_request_mode"):
+        # 按次计费必须有正单价：service 层会把缺省价兜底为 0，静默创建 0 元/次的计费模型
+        per_request = args.get("per_request_price")
+        try:
+            per_request_val = float(per_request) if per_request is not None else None
+        except (TypeError, ValueError):
+            raise ValueError(f"per_request_price 需为数字，收到：{per_request!r}")
+        if per_request_val is None or per_request_val <= 0:
+            raise ValueError("按次计费模式（is_request_mode）必须提供大于 0 的 per_request_price，"
+                             "否则会创建 0 元/次的计费模型")
     for price in ("input_price", "output_price", "cache_price", "per_request_price"):
         if args.get(price) is not None and float(args[price]) < 0:
             raise ValueError(f"{price} 不能为负数")

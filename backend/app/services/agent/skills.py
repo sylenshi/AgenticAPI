@@ -9,7 +9,7 @@
 
 安全约束（防"注入持久化"——模型生成内容落盘后持续影响后续所有会话）：
 1. name 强制 slug 校验（^[a-z0-9][a-z0-9-]{1,63}$），防路径穿越，仅可写单目录；
-2. 单文件 ≤ 32KB；content 落盘前过 redact_text 兜底清除残留密钥；
+2. 单文件 ≤ 32KB；content 落盘前过 redact_text（已知密钥精确替换）+ redact 形态掩码兜底；
 3. 删除仅限自定义目录，内置 skill 不可删。
 """
 
@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.core.config import DATA_DIR
-from app.services.agent.redact import redact_text
+from app.services.agent.redact import redact, redact_text
 
 BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "agent_skills"
 CUSTOM_SKILLS_DIR = DATA_DIR / "agent_skills"
@@ -124,7 +124,8 @@ def save_skill(*, name: str, description: str, triggers: str, content: str,
     description = (description or "").strip()
     if not description:
         raise ValueError("description 不能为空（目录展示与触发匹配都依赖它）")
-    sanitized = redact_text(content or "", extra_secrets)
+    # 先按已知密钥明文精确替换（extra_secrets），再过形态掩码兜底（sk- / Bearer / mysql:// 连接串）
+    sanitized = redact(redact_text(content or "", extra_secrets))
     if not sanitized.strip():
         raise ValueError("content 不能为空")
 
