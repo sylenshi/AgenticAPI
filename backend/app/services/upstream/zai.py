@@ -43,11 +43,16 @@ def fetch_zai_usage(operation_dict: dict, token_key: str = "ZAI_API_KEY") -> dic
         except ValueError:
             # HTTP 200 但响应体不是 JSON（空 body / 网关错误页），按上游异常返回，不拖垮整个接口
             return http_error(resp.status_code, f"non-JSON response: {resp.text[:200]!r}")
+        if not isinstance(data, dict):
+            # 响应体是 JSON 数组等非对象结构，同样按上游异常返回
+            return http_error(resp.status_code, f"unexpected payload type: {type(data).__name__}")
         # HTTP 200 但业务码非 200（如 token 失效）同样视为失败
         if data.get("code") != 200:
             return {"status": f"code:{data.get('code')}, msg:{str(data.get('msg'))[:200]}", "usage": {}, "raw": None}
 
         limits = safe_get(data, "data", "limits", default=[]) or []
+        if not isinstance(limits, list):
+            limits = []
 
         if any(x.get("type") == "CREDIT_LIMIT" for x in limits):
             # v3 套餐：按 unit 匹配时间窗，匹配不到时按返回顺序兜底（首个为 5 小时、次个为 7 天）

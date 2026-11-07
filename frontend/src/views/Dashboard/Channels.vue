@@ -62,7 +62,7 @@
       <a-form :model="channelForm" layout="vertical">
         <!-- 基本信息 -->
         <div class="config-section">
-          <h3>基本信息</h3>
+          <h5>基本信息</h5>
           <a-form-item label="渠道名称">
             <!-- 编辑模式下渠道名称不可修改（后端不允许更新 channel_name） -->
             <a-input
@@ -113,7 +113,7 @@
 
         <!-- 运行参数 -->
         <div class="config-section">
-          <h3>运行参数</h3>
+          <h5>运行参数</h5>
           <a-form-item label="状态">
             <a-switch v-model="channelForm.status"/>
             <span class="switch-hint">{{ channelForm.status ? '启用' : '禁用' }}</span>
@@ -258,7 +258,8 @@ const openEditDrawer = (row: channelInfoSchema) => {
     channelName: row.channelName ?? '',
     baseUrl: row.baseUrl ?? '',
     apiKey: row.apiKey ?? '',
-    supportModels: row.supportModels ?? [],
+    // 拷贝数组：supportModels 直接引用行数据的话，抽屉里的增删会原地改到表格行
+    supportModels: [...(row.supportModels ?? [])],
     status: row.status ?? true,
     timeout: Number(row.timeout) || 30,
     usedRatio: Number(row.usedRatio) || 0,

@@ -162,6 +162,7 @@ import {Message} from '@arco-design/web-vue'
 import {Progress} from '@arco-design/web-vue'
 import {getOperations, uploadOperations} from '@/api/operations'
 import {getErrorMessage} from '@/api/request'
+import {cssVar} from '@/utils/colors'
 import type {
   cookieSettings,
   volUsageData,
@@ -207,8 +208,9 @@ const planWindowRow = defineComponent({
           size: 'small' as const,
           showText: false,
           percent,
-          // 用量超过 80% 转橙色、95% 转红色预警
-          color: percent >= 0.95 ? '#F53F3F' : percent >= 0.8 ? '#FF7D00' : undefined,
+          // 用量超过 80% 转橙色、95% 转红色预警（Progress 的 color 直接写到 SVG stroke 属性，
+          // 不接受 var()，所以经 cssVar() 取设计令牌的实值）
+          color: percent >= 0.95 ? cssVar('--color-error') : percent >= 0.8 ? cssVar('--color-warning') : undefined,
         }),
       ])
     }

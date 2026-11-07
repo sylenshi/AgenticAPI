@@ -79,7 +79,7 @@ const newName = ref('')
 const creating = ref(false)
 
 const columns: TableColumnData[] = [
-  {title: 'ID', dataIndex: 'id', width: 64},
+  {title: 'ID', dataIndex: 'id', width: 80},
   {title: '备注名', dataIndex: 'name', minWidth: 100},
   {title: '密钥', slotName: 'key', minWidth: 240},
   {title: '状态', slotName: 'status', width: 90, align: 'center'},
@@ -161,14 +161,20 @@ onMounted(load)
   margin-top: var(--space-2);
 }
 
-/* 密钥展示：mono 等宽 + 圆角灰底内衬，替代 Arco code 默认的方角样式 */
+/* 密钥展示：mono 等宽 + 圆角灰底内衬，替代 Arco code 默认的方角样式
+   （padding 与全局表格密度对齐，避免撑高行） */
 .keys-table :deep(code) {
   font-family: var(--font-mono);
   font-size: 12px;
-  padding: 2px 8px;
+  padding: 1px 6px;
   background-color: var(--color-gray-50);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+/* ID 等短字段列不折行：列宽被压缩时 "12" 会在数字中间断成两行 */
+.keys-table :deep(.arco-table-tr > .arco-table-td:first-child) {
+  white-space: nowrap;
 }
 
 .keys-empty {

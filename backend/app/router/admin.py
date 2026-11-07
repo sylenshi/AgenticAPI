@@ -10,6 +10,7 @@ from app.router.deps import get_db
 from app.router.maintain_agent import _resolve_default_model as resolve_default_model
 from app.schemas.admin import ALLOWED_GROUPS, AdminUserBatchDeleteSchema, AdminUserUpdateSchema, SettingsUpdateSchema
 from app.utils.auth import get_current_admin
+from app.utils.pagination import normalize_page
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -42,10 +43,7 @@ async def list_users(
         admin=Depends(get_current_admin),
 ):
     """分页查询用户列表（可按用户名/昵称模糊搜索）"""
-    if page < 1:
-        page = 1
-    if pageSize < 1 or pageSize > 100:
-        pageSize = 10
+    page, pageSize = normalize_page(page, pageSize)
     users, total = await user_crud.list_users(db, keyword.strip(), page, pageSize)
     return success_response(message="获取用户列表成功", data={"list": [_user_dict(u) for u in users], "total": total})
 
@@ -125,6 +123,7 @@ async def get_settings(
         "agentEffectiveModel": agent_effective,
         "registerInitialBalance": float(await config_crud.get_initial_balance(db, config_crud.REGISTER_INITIAL_BALANCE_KEY)),
         "guestInitialBalance": float(await config_crud.get_initial_balance(db, config_crud.GUEST_INITIAL_BALANCE_KEY)),
+        "registerUserGroup": await config_crud.get_register_user_group(db),
     }
     return success_response(message="获取设置成功", data=data)
 
@@ -163,6 +162,12 @@ async def update_settings(
         if field in updates:
             await config_crud.set_value(db, key, str(updates[field]))
             detail_parts.append(f"{label}={updates[field]}")
+    if "register_user_group" in updates:
+        group = updates["register_user_group"]
+        if group not in ALLOWED_GROUPS:
+            raise HTTPException(status_code=400, detail=f"注册分组只能是 {' / '.join(ALLOWED_GROUPS)}")
+        await config_crud.set_value(db, config_crud.REGISTER_USER_GROUP_KEY, group)
+        detail_parts.append(f"注册分组={group}")
 
     await log_crud.write_log(
         db, type="admin", action="update_settings", user_id=admin.id, username=admin.username,

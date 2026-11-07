@@ -1,14 +1,26 @@
 import traceback
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette import status
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-# 开发模式：返回详细错误信息
-# 生产模式：返回简化错误信息
-DEBUG_MODE = True  # 教学项目保持开启
+from app.core.config import setting
+
+# 开发模式：返回详细错误信息；生产模式：返回简化错误信息
+# 跟 .env 的 DEBUG 走（本地开发 true，生产 false），避免堆栈 / SQL 原文泄露给客户端
+DEBUG_MODE = setting.DEBUG
+
+# 走 OpenAI 报文风格的端点（规范 §1 例外条款）：失败一律返回 {"error": {...}}，
+# 包括路由未匹配 404 / 方法不允许 405 / 鉴权依赖抛出的 401 等
+OPENAI_STYLE_PREFIXES = ("/v1",)
+
+
+def _is_openai_style_path(request: Request) -> bool:
+    path = request.url.path
+    return path.startswith(OPENAI_STYLE_PREFIXES) or path == "/studio/chat"
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -33,10 +45,32 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """
-    处理 HTTPException 异常
+    处理 HTTPException 异常（注册在 starlette 基类上：业务主动抛出的 fastapi.HTTPException
+    与路由未匹配 / 方法不允许的 404 / 405 都会走到这里）
+
+    OpenAI 风格端点（/v1/*、/studio/chat）按规范返回 {"error": {...}}，其余返回统一格式
     """
+    if _is_openai_style_path(request):
+        type_map = {
+            400: "invalid_request_error",
+            401: "invalid_request_error",
+            403: "access_denied",
+            404: "invalid_request_error",
+            405: "invalid_request_error",
+        }
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "message": exc.detail if isinstance(exc.detail, str) else "请求处理失败",
+                    "type": type_map.get(exc.status_code, "api_error"),
+                    "code": exc.status_code,
+                }
+            },
+        )
+
     # HTTPException 通常是业务逻辑主动抛出的，data 保持 None
     return JSONResponse(
         status_code=exc.status_code,
@@ -137,7 +171,7 @@ def register_exception_handlers(app):
     :param app: FastAPI 应用实例
     """
     app.add_exception_handler(RequestValidationError, validation_exception_handler)  # 处理请求参数校验异常
-    app.add_exception_handler(HTTPException, http_exception_handler)  # 处理 HTTPException 异常
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # 处理 HTTPException（含路由级 404/405）
     app.add_exception_handler(IntegrityError, integrity_error_handler)  # 处理数据库完整性约束错误
     app.add_exception_handler(SQLAlchemyError, sqlalchemy_error_handler)  # 处理 SQLAlchemy 数据库错误
     app.add_exception_handler(Exception, general_exception_handler)  # 处理所有未捕获的异常

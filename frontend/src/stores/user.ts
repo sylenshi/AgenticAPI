@@ -104,6 +104,21 @@ export const useUserStore = defineStore('user', () => { // 当前pinia的ID，�
         localStorage.removeItem(TOKEN_KEY)
     }
 
+    // 多标签页同步：storage 事件只在“其他标签页”写入时触发，本页写入不会收到
+    // 他页登出 → 本页同步清登录态；他页登录/切换账号 → 本页采纳新令牌并重拉用户信息
+    window.addEventListener('storage', (e) => {
+        if (e.key !== TOKEN_KEY) return
+        const newToken = e.newValue || ''
+        if (newToken === token.value) return
+        if (!newToken) {
+            token.value = ''
+            userInfo.value = null
+        } else {
+            token.value = newToken
+            fetchUserInfo()
+        }
+    })
+
 
     /** ═══════════ 全局登录/注册弹窗 ═══════════ */
 

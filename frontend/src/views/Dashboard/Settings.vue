@@ -52,6 +52,14 @@
           />
         </div>
         <div class="settings-row">
+          <span class="settings-label">正式注册用户分组</span>
+          <a-select v-model="form.registerUserGroup" :style="{width: '160px'}">
+            <a-option value="vip">vip（可调用全部分组模型）</a-option>
+            <a-option value="free">free（仅免费分组模型）</a-option>
+          </a-select>
+          <span class="settings-tip">新注册账号的默认模型分组；访客固定为 free 不受此项影响</span>
+        </div>
+        <div class="settings-row">
           <span class="settings-label">访客初始余额</span>
           <a-input-number
               v-model="form.guestInitialBalance" :min="0" :max="100000" :precision="2" :step="1"
@@ -59,7 +67,7 @@
           />
           <span class="settings-tip">访客账号可被批量创建，金额过大有被刷风险，建议保持 0 或小额</span>
         </div>
-        <p class="settings-tip settings-tip-block">仅对此后新创建的账号生效，存量用户余额不变</p>
+        <p class="settings-tip settings-tip-block">仅对此后新创建的账号生效，存量用户余额与分组不变</p>
       </div>
 
       <div class="settings-footer">
@@ -88,6 +96,7 @@ const form = reactive({
   agentDefaultModel: '',
   registerInitialBalance: 0,
   guestInitialBalance: 0,
+  registerUserGroup: 'vip',
 })
 let snapshot = {...form}
 
@@ -95,7 +104,8 @@ const hasChanges = computed(() =>
     form.chatRecordMaxTokens !== snapshot.chatRecordMaxTokens
     || (form.agentDefaultModel ?? '') !== snapshot.agentDefaultModel
     || form.registerInitialBalance !== snapshot.registerInitialBalance
-    || form.guestInitialBalance !== snapshot.guestInitialBalance,
+    || form.guestInitialBalance !== snapshot.guestInitialBalance
+    || form.registerUserGroup !== snapshot.registerUserGroup,
 )
 
 // 默认模型下拉：站内启用模型（管理员视角全量列表，按名称排序）
@@ -122,6 +132,7 @@ async function loadSettings() {
     form.agentDefaultModel = res.data.agentDefaultModel
     form.registerInitialBalance = res.data.registerInitialBalance
     form.guestInitialBalance = res.data.guestInitialBalance
+    form.registerUserGroup = res.data.registerUserGroup === 'free' ? 'free' : 'vip'
     effectiveModel.value = res.data.agentEffectiveModel
     snapshot = {...form}
   } catch (err) {
@@ -140,6 +151,7 @@ async function save() {
     if ((form.agentDefaultModel ?? '') !== snapshot.agentDefaultModel) payload.agentDefaultModel = form.agentDefaultModel ?? ''
     if (form.registerInitialBalance !== snapshot.registerInitialBalance) payload.registerInitialBalance = form.registerInitialBalance
     if (form.guestInitialBalance !== snapshot.guestInitialBalance) payload.guestInitialBalance = form.guestInitialBalance
+    if (form.registerUserGroup !== snapshot.registerUserGroup) payload.registerUserGroup = form.registerUserGroup
     await updateSiteSettings(payload)
     Message.success('设置已保存')
     await loadSettings()

@@ -6,6 +6,9 @@ from app.models import BaseModel  # 导入 app.models 包会触发所有表定�
 
 engine = create_async_engine(
     setting.MYSQL_URL,  # 数据库连接字符串
+    # 连接级固定会话时区为东八区：库内 CURRENT_TIMESTAMP 默认列与应用 datetime.now() 写入列
+    # 统一为 +08:00 口径（服务器系统时区为 UTC，不改这里两种口径会差 8 小时）
+    connect_args={"init_command": "SET time_zone='+08:00'"},
     pool_pre_ping=True,  # 连接池预检查
     echo=setting.DEBUG,  # 输出数据库语句
     pool_size=10,  # 连接池大小

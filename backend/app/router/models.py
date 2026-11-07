@@ -39,13 +39,14 @@ async def add_model(
     return success_response(message="添加模型成功", data={"modelId": model_id})
 
 
-@router.get("/test/{model_name}")
+@router.post("/test/{model_name}")
 async def test_model(
         model_name: str,
         db: AsyncSession = Depends(get_db),
         user=Depends(get_current_user),
 ):
-    """模型拨测，无需管理员权限，普通用户可调用，走公网接口，正常扣费、记录日志。
+    """模型拨测（POST，规范 §3.2；每用户 60s 冷却防无限触发真实上游调用），
+    无需管理员权限，普通用户可调用，走公网接口，正常扣费、记录日志。
     分组权限在服务层前置校验：free 用户只能拨 free 分组模型，vip 可拨全部"""
 
     response = await model_service.test_model(db, model_name, user)

@@ -5,6 +5,7 @@
 - agent_default_model：维护 Agent 默认大脑模型（解析链：本配置 → .env → 站内首个启用模型）
 - register_initial_balance：正式注册用户的初始余额（默认 0）
 - guest_initial_balance：访客账号的初始余额（默认 0，与正式注册独立配置）
+- register_user_group：正式注册用户的默认分组（free / vip，默认 vip；访客固定 free）
 """
 
 from decimal import Decimal
@@ -23,6 +24,10 @@ AGENT_DEFAULT_MODEL_KEY = "agent_default_model"
 REGISTER_INITIAL_BALANCE_KEY = "register_initial_balance"
 GUEST_INITIAL_BALANCE_KEY = "guest_initial_balance"
 INITIAL_BALANCE_DEFAULT = Decimal("0")
+
+# 正式注册用户默认分组的配置键（free / vip；访客固定 free，不进配置）
+REGISTER_USER_GROUP_KEY = "register_user_group"
+REGISTER_USER_GROUP_DEFAULT = "vip"
 
 
 async def get_value(db: AsyncSession, key: str, default: str | None = None) -> str | None:
@@ -66,3 +71,9 @@ async def get_initial_balance(db: AsyncSession, key: str) -> Decimal:
         return max(Decimal(value).quantize(Decimal("0.01")), INITIAL_BALANCE_DEFAULT)
     except (TypeError, ValueError, ArithmeticError):
         return INITIAL_BALANCE_DEFAULT
+
+
+async def get_register_user_group(db: AsyncSession) -> str:
+    """读取正式注册用户的默认分组，未配置或值非法时返回默认 vip"""
+    value = await get_value(db, REGISTER_USER_GROUP_KEY)
+    return value if value in ("free", "vip") else REGISTER_USER_GROUP_DEFAULT

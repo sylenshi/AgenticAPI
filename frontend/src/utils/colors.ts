@@ -28,3 +28,8 @@ export function tagColorByName(name: string): string {
   if (!name) return 'gray'
   return HUES[hashIndex(name) % HUES.length] ?? 'gray'
 }
+
+/** 读取根元素上的 CSS 设计令牌值（供不接受 var() 的 SVG 属性等场景使用，如 Arco Progress 的 color） */
+export function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}

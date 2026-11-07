@@ -131,7 +131,7 @@
           </template>
           兑换
         </a-button>
-        <span class="redeem-balance">当前余额 <b>{{ userStore.userInfo?.balance ?? '-' }}</b> 元</span>
+        <span class="redeem-balance">当前余额 <b :title="userStore.userInfo?.balance">{{ formatAmount(userStore.userInfo?.balance, 2, '-') }}</b> 元</span>
       </div>
       <p v-if="userStore.userInfo?.isGuest" class="redeem-tip">
         访客账号不支持兑换，请注册正式账号后再兑换充值。
@@ -236,6 +236,7 @@ import type {redeemCodeItem, redeemRecordItem, redeemStats} from '@/api/redempti
 import {getErrorMessage} from '@/api/request'
 import {useUserStore} from '@/stores/user'
 import {confirmDialog, copyText} from '@/utils/feedback'
+import {formatAmount} from '@/utils/format'
 
 const userStore = useUserStore()
 
@@ -607,14 +608,15 @@ onMounted(() => {
   color: var(--color-text-muted);
 }
 
-/* 兑换码展示：mono 等宽 + 圆角灰底内衬（与密钥页一致） */
+/* 兑换码展示：mono 等宽 + 圆角灰底内衬（与密钥页一致；显式不折行，避免末字符掉行） */
 .redeem-page :deep(code) {
   font-family: var(--font-mono);
   font-size: 12px;
-  padding: 2px 8px;
+  padding: 1px 6px;
   background-color: var(--color-gray-50);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  white-space: nowrap;
 }
 
 /* 生成弹窗 */

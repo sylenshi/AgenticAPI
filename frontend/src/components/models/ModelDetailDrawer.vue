@@ -115,7 +115,7 @@ watch(visible, (visible) => {
     modelGroup: model.modelGroup ?? '',
     label: model.label ?? '',
     icon: model.icon ?? '',
-    channels: model.channels ?? [],
+    channels: [...(model.channels ?? [])],
     isRequestMode: model.isRequestMode ?? false,
     perRequestPrice: Number(model.perRequestPrice) || 0,
     inputPrice: Number(model.inputPrice) || 0,

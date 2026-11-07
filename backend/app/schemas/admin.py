@@ -36,5 +36,6 @@ class SettingsUpdateSchema(BaseModel):
     agent_default_model: str | None = Field(default=None, max_length=128, alias="agentDefaultModel")
     register_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000, alias="registerInitialBalance")
     guest_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000, alias="guestInitialBalance")
+    register_user_group: str | None = Field(default=None, alias="registerUserGroup")
 
     model_config = {"populate_by_name": True}

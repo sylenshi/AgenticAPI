@@ -8,10 +8,13 @@
 
 import json
 import re
+import traceback
+
 from app.core.config import agent_setting
 from app.services import agent_service, search_service, studio_agent_service
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.router.deps import get_db
 from app.schemas.studio import StudioAsrSchema, StudioChatSchema, StudioTitleSchema
@@ -21,6 +24,12 @@ from app.utils.auth import get_current_user
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/studio", tags=["Studio"])
+
+
+def _unhandled_error() -> JSONResponse:
+    """未预期异常兜底：工坊对话走 OpenAI 报文风格，堆栈细节只进服务端日志"""
+    print(f"[studio] /studio/chat 未预期异常: {traceback.format_exc()}")
+    return RelayError(500, "服务器内部错误", "api_error").to_response()
 
 # 联网搜索工具定义：透传给上游。上游模型把它当"客户端函数工具"（发出 tool_calls
 # 后停下等结果），实际执行在后端 studio_agent_service 的工具循环里完成
@@ -89,6 +98,8 @@ async def studio_chat(body: StudioChatSchema, db: AsyncSession = Depends(get_db)
                 return await studio_agent_service.chat_with_search(db, payload, user)
             except RelayError as exc:
                 return exc.to_response()
+            except Exception:
+                return _unhandled_error()
 
     try:
         return await relay_service.chat_completions(db, payload, user, None, source="studio")
@@ -100,7 +111,11 @@ async def studio_chat(body: StudioChatSchema, db: AsyncSession = Depends(get_db)
                 return await relay_service.chat_completions(db, payload, user, None, source="studio")
             except RelayError as retry_exc:
                 return retry_exc.to_response()
+            except Exception:
+                return _unhandled_error()
         return exc.to_response()
+    except Exception:
+        return _unhandled_error()
 
 
 @router.post("/asr")

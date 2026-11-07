@@ -35,7 +35,9 @@
           @selection-change="onSelectionChange"
       >
         <template #username="{ record }">
-          {{ record.username }}<span v-if="record.isGuest" class="guest-mark">（访客）</span>
+          <!-- 用户名不折行（带括号后缀的账号名会被拆成三行），访客标记改为独立标签 -->
+          <span class="username-text">{{ record.username }}</span>
+          <a-tag v-if="record.isGuest" color="gray" size="small">访客</a-tag>
         </template>
         <template #nickname="{ record }">{{ record.nickname || '-' }}</template>
         <template #userGroup="{ record }">
@@ -51,7 +53,7 @@
           <a-input-number v-model="record.balance" size="small" :min="0" :step="0.01" :precision="2"
                           :style="{width: 110}" mode="button"/>
         </template>
-        <template #usedQuota="{ record }">{{ record.usedQuota.toFixed(6) }}</template>
+        <template #usedQuota="{ record }"><span :title="record.usedQuota">{{ formatAmount(record.usedQuota) }}</span></template>
         <template #status="{ record }">
           <a-switch v-model="record.status" size="small"/>
         </template>
@@ -87,6 +89,7 @@ import {getAdminUsers, updateAdminUser, deleteAdminUsers} from '@/api/admin'
 import type {adminUserItem} from '@/api/admin'
 import {getErrorMessage} from '@/api/request'
 import {confirmDialog} from '@/utils/feedback'
+import {formatAmount} from '@/utils/format'
 
 const loading = ref(false)
 const users = ref<adminUserItem[]>([])
@@ -98,7 +101,7 @@ const selectedKeys = ref<(string | number)[]>([])
 
 const columns: TableColumnData[] = [
   {title: 'ID', dataIndex: 'id', width: 100, align: 'center'},
-  {title: '用户名', slotName: 'username', width: 130, align: 'center'},
+  {title: '用户名', slotName: 'username', width: 180, align: 'center'},
   {title: '昵称', slotName: 'nickname', width: 100, ellipsis: true, align: 'center'},
   {title: '分组', slotName: 'userGroup', width: 130, align: 'center'},
   {title: '管理员', slotName: 'isAdmin', width: 100, align: 'center'},
@@ -218,8 +221,8 @@ onMounted(load)
   color: var(--color-text-muted);
 }
 
-.guest-mark {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
+/* 用户名整体不折行，避免 guest_xxxxxxxx 这类长名在字符中间断开 */
+:deep(.username-text) {
+  white-space: nowrap;
 }
 </style>

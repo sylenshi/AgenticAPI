@@ -96,6 +96,12 @@ def fetch_stepfun_usage(operation_dict: dict, ops_json_path: Path) -> tuple[dict
 
         data = resp.json()
         credit_buckets = safe_get(data, "plan_credit_rate_limit", "credit_buckets")
+        # 上游报文结构变化（字段缺失 / 空列表）时按"Error as Data"只打红本渠道，不打翻整个 /operations/get
+        if not isinstance(credit_buckets, list) or not credit_buckets:
+            return http_error(200, "stepfun 响应缺少 credit_buckets 数据"), stepfun_token
+        bucket = credit_buckets[0] if isinstance(credit_buckets[0], dict) else {}
+        total = int(safe_get(bucket, "credit_total") or 0)
+        residual = int(safe_get(bucket, "credit_residual") or 0)
         usage = {
             "stepfunFiveHourUsed": 0,
             "stepfunFiveHourTotal": 0,
@@ -103,11 +109,12 @@ def fetch_stepfun_usage(operation_dict: dict, ops_json_path: Path) -> tuple[dict
             "stepfunWeeklyUsed": 0,
             "stepfunWeeklyTotal": 0,
             "stepfunWeeklyResetAt": None,
-            "stepfunMonthlyUsed": int(safe_get(credit_buckets[0], "credit_total"))
-            - int(safe_get(credit_buckets[0], "credit_residual")),
-            "stepfunMonthlyTotal": int(safe_get(credit_buckets[0], "credit_total")),
+            "stepfunMonthlyUsed": total - residual,
+            "stepfunMonthlyTotal": total,
             "stepfunMonthlyResetAt": None,
         }
         return ok(usage, data), stepfun_token
     except httpx.HTTPError as e:
         return network_error(e), stepfun_token
+    except Exception as e:  # noqa: BLE001  # 解析类异常同样降级为该渠道错误数据
+        return http_error(200, f"stepfun 响应解析失败: {type(e).__name__}: {e}"), stepfun_token

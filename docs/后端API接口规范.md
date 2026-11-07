@@ -22,6 +22,7 @@
 
 > **例外**：`/v1/chat/completions`（对外中转）、`/v1/models`（可用模型列表）与 `/studio/chat`（模型工坊对话）走 OpenAI 报文风格——成功透传上游 JSON / SSE
 > 流或返回 OpenAI 结构（`/v1/models` 返回 `{"object": "list", "data": [...]}`），失败返回 `{"error": {message, type, code}}`，不套用本节格式。
+> 该例外覆盖**这些路径上的全部失败**（含 401 未认证、路由未匹配 404、方法不允许 405），其他路径的 404/405 也统一走 `{code, message, data}` 格式。
 
 | 字段        | 类型       | 说明                                                 |
 |-----------|----------|----------------------------------------------------|
@@ -49,7 +50,7 @@
 
 - HTTP 状态码与响应体 `code` 保持一致（400 / 404 / 422 / 500 等）。
 - `message` 为用户可读的中文错误描述，前端可直接用 `ElMessage` 展示。
-- `data` 在开发模式（`DEBUG_MODE = True`）下可能携带调试信息（错误类型、堆栈、请求路径），生产模式下为 `null`。
+- `data` 跟随后端 `.env` 的 `DEBUG` 开关：`DEBUG=true` 时可能携带调试信息（错误类型、堆栈、请求路径），生产模式（`DEBUG=false`）下为 `null`。
 
 ```json
 {
@@ -193,11 +194,12 @@ if await channel_crud.get_id_by_name(db, channel_name):
 | POST   | `/models`                   | 需管理员 | 添加单个模型                |
 | PUT    | `/models/{model_name}`      | 需管理员 | 更新模型（name 为定位键，不可被更新） |
 | DELETE | `/models/{model_name}`      | 需管理员 | 删除模型                  |
-| POST   | `/models/test/{model_name}` | 需登录  | 模型拨测                  |
+| POST   | `/models/test/{model_name}` | 需登录  | 模型拨测（每用户 60s 冷却）     |
 
 #### GET /models
 
 - 响应 `data`：模型数组。`channels` 为字符串数组（引用渠道名，按顺序轮询）。
+- **价格字段为字符串**：`perRequestPrice` / `inputPrice` / `cachePrice` / `outputPrice` 是 DECIMAL(12,4) 序列化后的字符串（如 `"2.5000"`），保证精度不丢；前端展示时自行 `Number()` 转换。
 
 ```json
 {
@@ -251,8 +253,10 @@ if await channel_crud.get_id_by_name(db, channel_name):
 
 #### POST /models/test/{model_name}
 
-- 成功响应：`message": "模型响应成功"`
-- 错误响应：`message": "模型响应失败"`
+- 模型拨测：走本站对外中转接口真实调用上游（正常计费、记录日志）。分组权限前置校验（free 用户仅 free 模型）。
+- **频控**：每用户 60 秒冷却，冷却期内请求返回 429 `拨测过于频繁，请 60 秒后再试`。
+- 成功响应：`message": "模型响应成功"`，`data: { ok, model, latencyMs, reply }`
+- 错误响应：模型不存在 → 404；分组无权限 → 403；上游失败 → 502（detail 带真实原因）。
 
 ### 3.3 上游运维（`/operations`）
 
@@ -279,7 +283,7 @@ if await channel_crud.get_id_by_name(db, channel_name):
 | PUT    | `/user/profile`  | 需登录 | 修改自己的资料（昵称/手机号，空字符串视为清空），返回更新后的用户信息                                |
 | DELETE | `/user/logout`   | 需登录 | 登出，删除服务端令牌（立即失效）                                                   |
 
-`userInfo` 结构（不含密码等敏感字段）：
+`userInfo` 结构（不含密码等敏感字段；`balance` / `usedQuota` 为 DECIMAL 字符串）：
 
 ```json
 {
@@ -287,14 +291,25 @@ if await channel_crud.get_id_by_name(db, channel_name):
   "username": "zcode_tester",
   "nickname": null,
   "phone": null,
-  "isGuest": false
+  "isGuest": false,
+  "isAdmin": false,
+  "balance": "1.000000",
+  "usedQuota": "0.000000",
+  "userGroup": "vip",
+  "createTime": "2026-11-06T23:57:06",
+  "lastLoginTime": "2026-11-06T23:57:14"
 }
 ```
 
+- **注册策略（站点可配）**：正式注册的初始余额（`registerInitialBalance`）与默认分组（`registerUserGroup`，free / vip，默认 vip）
+  由管理员在控制台-设置页调整（`/admin/settings`），仅对之后新创建的账号生效；访客固定 free 分组、初始余额独立配置（`guestInitialBalance`，建议 0）。
+- **余额与免费模型**：`/v1` 调用前校验余额 ≤ 0 则拒绝（402）；**全零定价的免费模型豁免余额校验**（不产生扣费，0 余额账号也可调用）；
+  付费模型在余额不足时返回 402 `账户余额不足，请联系管理员充值`。
 - 注册错误：用户名已存在 → 400；字段长度不符 → 422。
 - 登录错误：用户名或密码错误 → 401。
-- `isGuest`：访客账号标记，仅作数据区分——访客与普通用户权限相同（可管理密钥、修改资料、调用中转接口）；只有「需管理员」的接口会返回
-  403 `需要管理员权限`。过期/登出的访客账号在下次创建访客时被清理。
+- `isGuest`：访客账号标记，仅作数据区分——访客与普通用户权限相同（可管理密钥、修改资料、调用中转接口），**访客不支持兑换码充值**；只有「需管理员」的接口会返回
+  403 `需要管理员权限`。过期/登出的访客账号在下次创建访客时被清理（连带清理其维护 Agent 会话）。
+- 账号被封禁（管理员置 `status=false`）后，存量令牌立即失效：所有需登录接口返回 403 `账号已被封禁，请联系管理员`。
 
 ---
 
@@ -310,8 +325,8 @@ if await channel_crud.get_id_by_name(db, channel_name):
 | GET | `/monitor/chats`     | 需登录  | 对话记录分页；查询参数 `page` / `pageSize` / `model`（模型名精确）/ `username`（用户名模糊，仅管理员生效）；管理员可查全部用户，普通用户强制只看自己                                         |
 | GET | `/monitor/logs`      | 需登录  | 系统日志分页；查询参数 `page` / `pageSize` / `type`（api/login/admin/user）/ `keyword`（用户名/动作/详情模糊）/ `model` / `start` / `end`（闭开区间）；管理员看全部，普通用户只看自己 |
 | GET | `/monitor/stats`     | 需登录  | 当前用户用量：查询参数 `start` / `end` / `granularity`（hour/day/week/month），返回 `data: { totals, buckets }`，`buckets` 每元素为某模型在某时间桶的累计               |
-| GET | `/monitor/threshold` | 需管理员 | 读取对话记录长度阈值，返回 `data: { value }`                                                                                                         |
-| PUT | `/monitor/threshold` | 需管理员 | 更新阈值，请求体 `{ "value": 5000 }`（1 ~ 1000000），立即生效并写 admin 日志                                                                               |
+
+> 对话记录长度阈值的读写已迁移至 `/admin/settings`（`chatRecordMaxTokens`，值域 100 ~ 1000000），本模块不再提供 threshold 端点。
 
 `chats` 返回的 `list` 元素结构（`inputContent` 已还原为 messages 数组）：
 
@@ -409,6 +424,85 @@ mp3），成功返回：
 ```
 
 未在后端 `.env` 配置 `STEPFUN_API_KEY` 时返回 503「语音服务未配置」；上游异常返回 502。
+
+#### POST /studio/title（需登录，统一响应格式）
+
+由首条用户消息概括会话标题（代理 StepFun，未配置 `AGENT_TITLE_MODEL` 时回退截断文案）。请求体 `{ "content": "..." }`，
+返回 `data: { title, source }`（`source` 为 `model` / `fallback`）。
+
+### 3.7 API 密钥（`/keys`）
+
+路由文件 `app/router/keys.py`。用户在控制台-秘钥页管理自己的 `sk-` 密钥，**每个用户最多 5 个**。
+
+| 方法     | 路径           | 鉴权  | 说明                     |
+|--------|--------------|-----|------------------------|
+| GET    | `/keys`      | 需登录 | 当前用户全部密钥（含 `key` 明文）    |
+| POST   | `/keys`      | 需登录 | 创建密钥，请求体 `{ "name": "..." }`，超 5 个返回 400 |
+| PUT    | `/keys/{id}` | 需登录 | 改名 / 启停（部分更新语义）         |
+| DELETE | `/keys/{id}` | 需登录 | 删除自己的密钥                 |
+
+`data` 元素结构：`{ id, name, key, status, createTime, lastUsedTime }`（驼峰）。增删改均写 user 日志。
+
+### 3.8 兑换码（`/redeem`）
+
+路由文件 `app/router/redeem.py`（用户端）。**访客禁止兑换**（403）。
+
+| 方法  | 路径                | 鉴权  | 说明                                    |
+|-----|-------------------|-----|---------------------------------------|
+| POST | `/redeem`        | 需登录 | 核销兑换码充值，请求体 `{ "code": "AGC-..." }`，成功返回 `data: { balance }`（字符串） |
+| GET  | `/redeem/records` | 需登录 | 我的兑换记录分页（`page` / `pageSize`）          |
+
+核销错误：码不存在 / 已使用 / 已停用 → 400。核销为单事务：`SELECT ... FOR UPDATE` 锁码行防并发重复核销，日志与余额同事务提交。
+
+### 3.9 管理员接口（`/admin/*`）
+
+路由文件 `app/router/admin.py` 与 `app/router/redeem.py`（admin_router），全部需管理员。
+
+| 方法     | 路径                                | 说明                                                     |
+|--------|-----------------------------------|--------------------------------------------------------|
+| GET    | `/admin/users`                    | 用户列表分页（`keyword` / `page` / `pageSize`），含余额、分组、状态等 |
+| PUT    | `/admin/users/{id}`               | 修改用户（余额 / 分组 / 管理员 / 状态 / 昵称，部分更新；管理员必须 vip；不能改自己的管理员身份） |
+| DELETE | `/admin/users`                    | 批量删除用户，请求体 `{ "ids": [...] }`（连带删除令牌、密钥与 Agent 会话；不能删自己） |
+| GET    | `/admin/settings`                 | 站点设置当前值（见下）                                             |
+| PUT    | `/admin/settings`                 | 更新站点设置（部分更新，先校验后写入，写 admin 日志）                          |
+| GET    | `/admin/redeem-codes`             | 兑换码列表分页（`status` / `keyword` / `batchNo` / `page` / `pageSize`） |
+| GET    | `/admin/redeem-codes/stats`       | 兑换码监控统计（四卡数据）                                            |
+| POST   | `/admin/redeem-codes/generate`    | 批量生成（`count` ≤ 100、`amount`、`batchNo`、`remark`），返回全部码值  |
+| PUT    | `/admin/redeem-codes/{id}/disable`| 停用单张未使用的码                                               |
+| PUT    | `/admin/redeem-codes/batch-disable`| 批量停用（仅未使用生效），请求体 `{ "ids": [...] }`                    |
+| DELETE | `/admin/redeem-codes`             | 物理销毁（未使用/已停用可销毁，已核销禁止），请求体 `{ "ids": [...] }`           |
+
+`/admin/settings` 的 `data` 结构（驼峰；`PUT` 请求体传其中任意子集）：
+
+```json
+{
+  "chatRecordMaxTokens": 5000,
+  "agentDefaultModel": "",
+  "agentEffectiveModel": "glm-5.3",
+  "registerInitialBalance": 0,
+  "guestInitialBalance": 0,
+  "registerUserGroup": "vip"
+}
+```
+
+- `agentDefaultModel` 传空串表示清除指定、恢复默认解析链（`.env` → 站内首个启用模型）；`agentEffectiveModel` 为只读的当前实际生效值。
+- `chatRecordMaxTokens` 值域 100 ~ 1000000；`registerUserGroup` 仅接受 `free` / `vip`。
+
+### 3.10 站点信息与上游运维
+
+| 方法   | 路径                     | 鉴权   | 说明                                                         |
+|------|------------------------|------|------------------------------------------------------------|
+| GET  | `/site/info`           | 公开   | 站点公开信息（含对外中转接口地址 `publicBaseUrl` 等，前端据此拼接 Base URL）          |
+| GET  | `/operations/get`      | 需管理员 | 上游用量数据，`refresh_channel` 可选 `vol` / `stepfun` / `zai2` / `antigravity` / `all` |
+| POST | `/operations/upload`   | 需管理员 | 更新上游运维凭证（Body 传 `brmToken` / `instanceId` / `stepToken` / `stepWebid` / `zaiApiKey`） |
+
+`/operations/get` 的 `data` 外层段名为蛇形（`status` / `vol_usage` / `stepfun_usage` / `zai2_usage` / `antigravity_usage`），
+各段叶子键为驼峰；单渠道失败只影响自己的段（`status` 非 `"200"`），不影响其他渠道。
+
+### 3.11 站内维护 Agent
+
+`/maintain-agent/*` 系列接口（会话管理 / 对话 / 审批 / 导出，需管理员）属于站点维护 Agent 模块，
+规范见 [`docs/维护Agent设计文档.md`](docs/维护Agent设计文档.md)，本文件不再展开。
 
 ---
 

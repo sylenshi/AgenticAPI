@@ -41,6 +41,9 @@ async def get_current_user(
     user = await get_user_by_token(db, credentials.credentials)
     if not user:
         raise HTTPException(status_code=401, detail="无效或已过期的访问令牌")
+    # 封禁账号立即拒绝存量令牌（与登录接口、/v1 中转的封禁语义对齐），403 不清前端登录态
+    if not user.status:
+        raise HTTPException(status_code=403, detail="账号已被封禁，请联系管理员")
     return user
 
 

@@ -201,7 +201,8 @@ async def redeem(db: AsyncSession, user_id: int, username: str, code: str) -> tu
     )
     await write_log(
         db, type="user", action="redeem_code", user_id=user_id, username=username,
-        detail=f"兑换码「{record.code}」充值 {record.amount} 元", cost=record.amount, auto_commit=False,
+        # cost 是 api 类日志的专用消费字段（保持 0），充值面值只进 detail，避免污染营收统计
+        detail=f"兑换码「{record.code}」充值 {record.amount} 元", auto_commit=False,
     )
     await db.commit()
 

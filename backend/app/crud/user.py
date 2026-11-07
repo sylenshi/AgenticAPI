@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud import api_key as api_key_crud
 from app.crud import system_config as config_crud
-from app.models import UserTokenTabel
+from app.models import AgentMessageTable, AgentSessionTable, UserTokenTabel
 from app.models.api_key import ApiKeyTable
 from app.models.user import UserTabel
 from app.schemas.user import UserLoginSchema
@@ -32,12 +32,13 @@ async def create_user(db: AsyncSession, user_data: UserLoginSchema) -> UserTabel
     """
     # 先密码加密
     hashed_password = hash_password(user_data.password)
-    # 再创建用户（正式注册统一进 vip 分组，可调用全部分组模型；访客走 create_guest_user 进 free）
+    # 再创建用户（正式注册默认分组读站点设置 register_user_group，free / vip，默认 vip；
+    # 访客走 create_guest_user 固定 free）
     # 初始余额读站点设置（system_config.register_initial_balance，默认 0），只对新注册生效
     user = UserTabel(
         username=user_data.username,
         password=hashed_password,
-        user_group="vip",
+        user_group=await config_crud.get_register_user_group(db),
         balance=await config_crud.get_initial_balance(db, config_crud.REGISTER_INITIAL_BALANCE_KEY),
     )
     db.add(user)  # 这里不使用await，因为add方法是同步的
@@ -179,11 +180,23 @@ async def clean_expired_guests(db: AsyncSession) -> int:
     ]
     if not dead_ids:
         return 0
+    await _delete_user_agent_data(db, dead_ids)
     # 先删令牌行再删用户行（user_token.user_id 有外键约束指向 user.id）
     await db.execute(delete(UserTokenTabel).where(UserTokenTabel.user_id.in_(dead_ids)))
     await db.execute(delete(UserTabel).where(UserTabel.id.in_(dead_ids)))
     await db.commit()
     return len(dead_ids)
+
+
+async def _delete_user_agent_data(db: AsyncSession, user_ids: list[int]) -> None:
+    """连带删除用户的维护 Agent 会话与消息（会话删用户后成孤儿且无审计价值，防持续累积）"""
+    session_ids = await db.scalars(
+        select(AgentSessionTable.id).where(AgentSessionTable.user_id.in_(user_ids))
+    ).all()
+    if session_ids:
+        # 先删消息再删会话（agent_message.session_id 有外键约束）
+        await db.execute(delete(AgentMessageTable).where(AgentMessageTable.session_id.in_(session_ids)))
+        await db.execute(delete(AgentSessionTable).where(AgentSessionTable.id.in_(session_ids)))
 
 
 # 更新最后登录时间（登录/注册/访客创建时调用）
@@ -257,10 +270,12 @@ async def update_user_by_id(db: AsyncSession, user_id: int, update_dict: dict) -
 
 async def delete_users(db: AsyncSession, user_ids: list[int]) -> int:
     """
-    批量删除用户：连带删除其登录令牌与API密钥（外键约束要求先删子表），返回删除的用户数
+    批量删除用户：连带删除其登录令牌、API密钥与维护 Agent 会话/消息
+    （外键约束要求先删子表），返回删除的用户数
     """
     if not user_ids:
         return 0
+    await _delete_user_agent_data(db, user_ids)
     await db.execute(delete(UserTokenTabel).where(UserTokenTabel.user_id.in_(user_ids)))
     await db.execute(delete(ApiKeyTable).where(ApiKeyTable.user_id.in_(user_ids)))
     result = await db.execute(delete(UserTabel).where(UserTabel.id.in_(user_ids)))

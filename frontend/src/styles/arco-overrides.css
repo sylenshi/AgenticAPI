@@ -116,6 +116,13 @@ body,
   padding: 1px 6px;
 }
 
+/* 表格单元格内嵌编辑控件（用户管理的分组下拉 / 余额步进器等）压到 24px，避免撑高行 */
+.arco-table-td .arco-select-view-single,
+.arco-table-td .arco-input-wrapper,
+.arco-table-td .arco-input-number {
+  min-height: 24px;
+}
+
 /* 固定列与滚动容器：圆角裁剪只作用于外层，内层滚动不受影响 */
 .arco-table-container {
   scrollbar-width: thin;
@@ -256,6 +263,25 @@ body,
 
 .arco-pagination-item-active {
   font-weight: var(--font-semibold);
+}
+
+/* 跳页输入框：可见边框 + 末尾「页」字（Arco 默认无边框且无后缀，视觉上像个排版缺口） */
+.arco-pagination-jumper .arco-pagination-jumper-input {
+  width: 56px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background-color: var(--color-white);
+}
+
+.arco-pagination-jumper .arco-pagination-jumper-input .arco-input-number-input {
+  text-align: center;
+}
+
+.arco-pagination-jumper::after {
+  content: '页';
+  margin-left: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }
 
 .arco-message-list {

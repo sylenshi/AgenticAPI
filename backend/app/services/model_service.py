@@ -121,6 +121,11 @@ async def remove_model(db: AsyncSession, model_name: str) -> None:
         raise HTTPException(status_code=500, detail="删除模型失败，未影响任何记录")
 
 
+# 拨测每用户冷却（内存频控，单进程部署下有效）：拨测是真实上游调用，防无限触发
+PROBE_COOLDOWN_SECONDS = 60
+_probe_last_ts: dict[int, float] = {}
+
+
 async def test_model(db: AsyncSession, model_name: str, user: UserTabel) -> dict:
     """
     模型拨测：走本站对外中转接口，与真实调用方同链路（正常计费、记录日志）。
@@ -138,6 +143,13 @@ async def test_model(db: AsyncSession, model_name: str, user: UserTabel) -> dict
     api_key = await user_crud.get_api_key_by_user_id(db, user.id)
     if not api_key:
         raise HTTPException(status_code=400, detail="用户未绑定API密钥")
+
+    # 冷却检查在真正发起上游调用前：失败/成功都计一次，防止拿拨测当免费生成接口刷
+    now_ts = time.time()
+    last_ts = _probe_last_ts.get(user.id)
+    if last_ts is not None and now_ts - last_ts < PROBE_COOLDOWN_SECONDS:
+        raise HTTPException(status_code=429, detail=f"拨测过于频繁，请 {PROBE_COOLDOWN_SECONDS} 秒后再试")
+    _probe_last_ts[user.id] = now_ts
 
     url = f"{server_setting.RELAY_BASE_URL}/chat/completions"
     headers = {

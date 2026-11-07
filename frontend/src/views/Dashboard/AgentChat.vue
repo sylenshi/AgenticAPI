@@ -19,8 +19,14 @@
           </a-select>
         </header>
 
-        <ChatMessages :messages="agentStore.messages" :is-streaming="agentStore.isStreaming"
-                      @approve-tool="onApprove"/>
+        <!-- 有会话但还没有消息：给引导空态，会话区不再整块留白 -->
+        <ChatMessages v-if="agentStore.messages.length" :messages="agentStore.messages"
+                      :is-streaming="agentStore.isStreaming" @approve-tool="onApprove"/>
+        <div v-else class="chat-empty chat-empty-session">
+          <icon-robot class="empty-icon"/>
+          <h3>新会话已就绪</h3>
+          <p>在下方输入框描述运维目标即可开始，例如：<br>「巡检全部渠道并把异常的停用」「导出用户表最近 7 天数据」</p>
+        </div>
         <AgentInput :is-streaming="agentStore.isStreaming"
                     @send="(text) => agentStore.send(text)" @stop="agentStore.stop()"/>
       </template>
@@ -310,7 +316,7 @@ async function confirmClear() {
 }
 
 .session-delete:hover {
-  color: var(--color-danger);
+  color: var(--color-error);
 }
 
 .session-empty {

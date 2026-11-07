@@ -95,23 +95,24 @@ export const useStudioStore = defineStore('studio', () => {
         }
     }
 
-    /** 登录用户变化时重载对应的本地数据（登出后回到 guest 桶） */
-    function reloadForUser() {
-        const userId = userStore.userInfo?.id ?? 'guest'
-        if (userId === currentUserId) return
-        cancelPendingSave()
-        currentUserId = userId
-
+    /** 从 localStorage 重读当前用户的会话桶（换桶 / 多标签页同步共用）；当前会话仍在则保持选中 */
+    function reloadSessions() {
         try {
-            const raw = localStorage.getItem(storageKey('sessions', userId))
+            const raw = localStorage.getItem(storageKey('sessions', currentUserId))
             const parsed = raw ? JSON.parse(raw) : []
             sessions.value = Array.isArray(parsed) ? parsed : []
         } catch {
             sessions.value = []
         }
+        currentSessionId.value = sessions.value.some(s => s.id === currentSessionId.value)
+            ? currentSessionId.value
+            : (sessions.value[0]?.id || '')
+    }
 
+    /** 从 localStorage 重读当前用户的参数桶 */
+    function reloadParams() {
         try {
-            const rawParams = localStorage.getItem(storageKey('params', userId))
+            const rawParams = localStorage.getItem(storageKey('params', currentUserId))
             const parsed = rawParams ? JSON.parse(rawParams) : {}
             selectedModelName.value = typeof parsed.model === 'string' ? parsed.model : ''
             params.value = {...DEFAULT_STUDIO_PARAMS, ...parsed}
@@ -119,12 +120,32 @@ export const useStudioStore = defineStore('studio', () => {
             selectedModelName.value = ''
             params.value = {...DEFAULT_STUDIO_PARAMS}
         }
+    }
 
-        currentSessionId.value = sessions.value[0]?.id || ''
+    /** 登录用户变化时重载对应的本地数据（登出后回到 guest 桶） */
+    function reloadForUser() {
+        const userId = userStore.userInfo?.id ?? 'guest'
+        if (userId === currentUserId) return
+        cancelPendingSave()
+        currentUserId = userId
+        reloadSessions()
+        reloadParams()
     }
 
     // 跟随登录态自动换桶（App 启动拉到 userInfo、登录 / 登出时触发）
     watch(() => userStore.userInfo?.id, reloadForUser, {immediate: true})
+
+    // 多标签页同步：他页写入会话/参数桶时本页重读（storage 事件只在他页触发，本页写入不会收到）
+    // 本页正在流式生成时不采纳，避免生成中的本地状态被覆盖
+    window.addEventListener('storage', (e) => {
+        if (isStreaming.value || !e.key) return
+        if (e.key === storageKey('sessions', currentUserId)) {
+            cancelPendingSave()
+            reloadSessions()
+        } else if (e.key === storageKey('params', currentUserId)) {
+            reloadParams()
+        }
+    })
 
     /** ═══════════ 会话管理 ═══════════ */
 

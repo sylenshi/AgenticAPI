@@ -197,7 +197,12 @@ async def chat_completions(
         upstream_body["model"] = upstream_name
     if is_stream:
         # 流式响应默认不返回用量，加上 include_usage 让上游在最后一个 chunk 带回 usage 供计费
-        upstream_body.setdefault("stream_options", {}).setdefault("include_usage", True)
+        # （调用方可能传 stream_options: null 等非法值，显式判型避免 AttributeError）
+        stream_options = upstream_body.get("stream_options")
+        if not isinstance(stream_options, dict):
+            stream_options = {}
+        stream_options.setdefault("include_usage", True)
+        upstream_body["stream_options"] = stream_options
 
     last_error = "无可用渠道"
     for channel_name in _ordered_channels(model_name, channel_names):
@@ -333,9 +338,9 @@ async def _finalize_call(
         await db.rollback()
         print(f"[relay] 用量统计写入失败: {exc.__class__.__name__}: {exc}")
 
-    # ── 对话记录：工坊调用必写；普通中转在模型开启 is_log 时写；维护 Agent 不写
-    #    （维护对话独立存储在 agent_message 表，见 _finalize_call 文档注释）──
-    if not is_agent and (is_studio or model.get("is_log")):
+    # ── 对话记录：普通中转在模型开启 is_log 时写；工坊与维护 Agent 不写
+    #    （规范 §3.6：监控页对话数据仅统计中转调用；维护对话独立存储在 agent_message 表）──
+    if not is_agent and not is_studio and model.get("is_log"):
         try:
             threshold = await config_crud.get_chat_record_threshold(db)
             if prompt_tokens + completion_tokens > threshold:

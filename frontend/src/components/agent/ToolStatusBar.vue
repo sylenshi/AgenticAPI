@@ -152,7 +152,7 @@ watch(
 }
 
 .status-dot.failed {
-  background: var(--color-danger);
+  background: var(--color-error);
 }
 
 .tool-spinner {

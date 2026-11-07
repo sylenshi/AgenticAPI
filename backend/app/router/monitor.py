@@ -17,6 +17,7 @@ from app.crud import log as log_crud
 from app.crud import usage_stats as stats_crud
 from app.router.deps import get_db
 from app.utils.auth import get_current_admin, get_current_user
+from app.utils.pagination import normalize_page
 from app.utils.response import success_response
 
 router = APIRouter(prefix="/monitor", tags=["Monitor"])
@@ -62,15 +63,6 @@ def _log_dict(row: dict) -> dict:
     }
 
 
-def _normalize_page(page: int, pageSize: int) -> tuple[int, int]:
-    """归一化分页参数"""
-    if page < 1:
-        page = 1
-    if pageSize < 1 or pageSize > 100:
-        pageSize = 10
-    return page, pageSize
-
-
 @router.get("/summary")
 async def get_site_summary(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """全站累计用量（读 usage_summary 单行，O(1) 无聚合计算）"""
@@ -99,7 +91,7 @@ async def list_chat_records(
     :param model: 模型名精确筛选
     :param username: 用户名模糊筛选（仅管理员生效）
     """
-    page, pageSize = _normalize_page(page, pageSize)
+    page, pageSize = normalize_page(page, pageSize)
     records, total = await chat_crud.list_records(
         db,
         user_id=None if user.is_admin else user.id,
@@ -130,7 +122,7 @@ async def list_logs(
     :param keyword: 用户名 / 动作 / 详情 模糊搜索
     :param start / end: 时间范围，闭开区间 [start, end)
     """
-    page, pageSize = _normalize_page(page, pageSize)
+    page, pageSize = normalize_page(page, pageSize)
     logs, total = await log_crud.query_logs(
         db,
         user_id=None if user.is_admin else user.id,

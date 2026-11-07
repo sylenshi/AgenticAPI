@@ -48,7 +48,7 @@
               :bordered="{wrapper: true}" :pagination="false" :scroll="{x: 920}"
           >
             <template #time="{ record }">{{ formatTime(record.createTime) }}</template>
-            <template #cost="{ record }">{{ record.cost?.toFixed?.(6) ?? record.cost }}</template>
+            <template #cost="{ record }"><span :title="record.cost">{{ formatAmount(record.cost) }}</span></template>
             <template #duration="{ record }">{{ formatDuration(record.durationMs) }}</template>
             <!-- 新增：详情操作列 -->
             <template #detail="{ record }">
@@ -71,7 +71,7 @@
                 <a-descriptions-item label="输入/输出/缓存">
                   {{ selectedChat.promptTokens }} / {{ selectedChat.completionTokens }} / {{ selectedChat.cacheTokens }}
                 </a-descriptions-item>
-                <a-descriptions-item label="费用">{{ selectedChat.cost?.toFixed?.(6) }}</a-descriptions-item>
+                <a-descriptions-item label="费用"><span :title="String(selectedChat.cost ?? '')">{{ formatAmount(selectedChat.cost) }}</span></a-descriptions-item>
                 <a-descriptions-item label="耗时">{{ formatDuration(selectedChat.durationMs) }}</a-descriptions-item>
               </a-descriptions>
 
@@ -142,7 +142,7 @@
             <template #tokens="{ record }">
               {{ record.promptTokens }} / {{ record.completionTokens }} / {{ record.cacheTokens }}
             </template>
-            <template #cost="{ record }">{{ record.cost ? record.cost.toFixed(6) : '-' }}</template>
+            <template #cost="{ record }"><span :title="record.cost">{{ formatAmount(record.cost) }}</span></template>
             <template #duration="{ record }">{{ formatDuration(record.durationMs) }}</template>
           </a-table>
           <a-pagination
@@ -221,6 +221,7 @@ import {Message} from '@arco-design/web-vue'
 import type {TableColumnData} from '@arco-design/web-vue'
 import LineChart from '@/components/monitor/LineChart.vue'
 import {getErrorMessage} from '@/api/request'
+import {formatAmount} from '@/utils/format'
 import {
   getChatRecords, getMonitorLogs, getSiteSummary, getUserStats,
 } from '@/api/monitor'

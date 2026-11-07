@@ -158,17 +158,29 @@ function nextTickResize() {
   })
 }
 
-/** ═══════════ 图片附件：选择 / 粘贴 / 拖入，单张 ≤ 5MB ═══════════ */
+/** ═══════════ 图片附件：选择 / 粘贴 / 拖入，最多 3 张、单张 ≤ 1MB（与 tooltip 文案一致） ═══════════ */
 
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024
+const MAX_IMAGE_SIZE = 1 * 1024 * 1024
+// 会话含图片 dataUrl 会全量落 localStorage，多图/大图会把 5MB 存储配额撑爆
+const MAX_IMAGE_COUNT = 3
 
 function addImageFiles(files: Iterable<File>) {
-  for (const file of files) {
-    if (!file.type.startsWith('image/')) continue
+  const valid = [...files].filter(f => f.type.startsWith('image/'))
+  let slots = MAX_IMAGE_COUNT - images.value.length
+  if (slots <= 0) {
+    Message.warning(`最多上传 ${MAX_IMAGE_COUNT} 张图片`)
+    return
+  }
+  for (const file of valid) {
+    if (slots <= 0) {
+      Message.warning(`最多上传 ${MAX_IMAGE_COUNT} 张图片，多余的已跳过`)
+      break
+    }
     if (file.size > MAX_IMAGE_SIZE) {
-      Message.warning(`图片 ${file.name} 超过 5MB，已跳过`)
+      Message.warning(`图片 ${file.name} 超过 1MB，已跳过`)
       continue
     }
+    slots -= 1
     const reader = new FileReader()
     reader.onload = () => {
       images.value.push({
@@ -358,34 +370,34 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-/* 录音提示条 */
+/* 录音提示条（颜色/圆角一律引用设计令牌，禁止写死十六进制色值） */
 .recording-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
   padding: 4px 12px;
-  border-radius: 6px;
-  background: #fef3c7;
-  color: #f59e0b;
+  border-radius: var(--radius-md);
+  background: var(--color-warning-light);
+  color: var(--color-warning);
   font-size: 14px;
 }
 
 .recording-bar.transcribing {
-  background: #d1fae5;
-  color: #10b981;
+  background: var(--color-success-light);
+  color: var(--color-success);
 }
 
 .recording-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #f59e0b;
+  background: var(--color-warning);
   animation: recording-pulse 1s infinite;
 }
 
 .recording-bar.transcribing .recording-dot {
-  background: #10b981;
+  background: var(--color-success);
 }
 
 @keyframes recording-pulse {
@@ -455,5 +467,18 @@ onBeforeUnmount(() => {
 .input-hint {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+/* 窄屏兜底（规范 §5）：三栏布局下中间聊天区可能被压到 400px 以下，
+   隐藏"按 Enter 发送"提示并允许工具栏换行，避免与发送按钮互相挤压 */
+@media (max-width: 960px) {
+  .input-hint {
+    display: none;
+  }
+
+  .toolbar-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
 }
 </style>

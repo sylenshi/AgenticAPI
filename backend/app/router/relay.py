@@ -5,6 +5,8 @@
 """
 
 import json
+import traceback
+
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud import api_key as api_key_crud
@@ -56,7 +58,13 @@ async def list_models(request: Request, db: AsyncSession = Depends(get_db)):
         _, user = await _authenticate_api_key(db, request)
     except RelayError as exc:
         return exc.to_response()
-    return await relay_service.list_models_for_user(db, user)
+    try:
+        return await relay_service.list_models_for_user(db, user)
+    except RelayError as exc:
+        return exc.to_response()
+    except Exception:
+        print(f"[relay] /v1/models 未预期异常: {traceback.format_exc()}")
+        return RelayError(500, "服务器内部错误", "api_error").to_response()
 
 
 @router.post("/chat/completions")
@@ -86,3 +94,7 @@ async def chat_completions(request: Request, db: AsyncSession = Depends(get_db))
         return await relay_service.chat_completions(db, payload, user, key_obj.id)
     except RelayError as exc:
         return exc.to_response()
+    except Exception:
+        # 未预期异常也保持 OpenAI 报文契约，细节只进服务端日志
+        print(f"[relay] /v1/chat/completions 未预期异常: {traceback.format_exc()}")
+        return RelayError(500, "服务器内部错误", "api_error").to_response()

@@ -139,7 +139,7 @@ const exampleCurl = computed(() => {
     messages: buildExampleMessages(model),
     max_tokens: exampleMaxTokens(model),
   }, null, 2)
-  return `curl ${relayBaseUrl}/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${exampleApiKey.value}" \\\n  -d '${body}'`
+  return `curl ${relayBaseUrl.value}/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${exampleApiKey.value}" \\\n  -d '${body}'`
 })
 
 // Python 示例：OpenAI SDK，把 base_url 指向本站即可无缝切换
@@ -164,7 +164,7 @@ const examplePython = computed(() => {
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="${relayBaseUrl}",
+    base_url="${relayBaseUrl.value}",
     api_key="${exampleApiKey.value}",
 )
 

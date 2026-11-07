@@ -85,7 +85,7 @@ onBeforeUnmount(() => {
 }
 
 .approval-card.risk-l2 {
-  border-color: var(--color-danger);
+  border-color: var(--color-error);
   background: var(--color-error-light);
 }
 
@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
 }
 
 .risk-tag.l2 {
-  background: var(--color-danger);
+  background: var(--color-error);
 }
 
 .approval-tool {
@@ -136,7 +136,7 @@ onBeforeUnmount(() => {
 }
 
 .approval-verdict.approved { color: var(--color-success); }
-.approval-verdict.rejected { color: var(--color-danger); }
+.approval-verdict.rejected { color: var(--color-error); }
 .approval-verdict.timeout { color: var(--color-text-muted); }
 
 .approval-section {

@@ -10,11 +10,11 @@
     <div class="stat-cards">
       <div class="stat-card stat-accent-green">
         <div class="stat-label">账户余额（元）</div>
-        <div class="stat-value stat-value-brand">{{ info?.balance ?? '0.0000' }}</div>
+        <div class="stat-value stat-value-brand" :title="info?.balance">{{ formatAmount(info?.balance, 2, '0.00') }}</div>
       </div>
       <div class="stat-card stat-accent-orange">
         <div class="stat-label">累计消费（元）</div>
-        <div class="stat-value">{{ info?.usedQuota ?? '0.0000' }}</div>
+        <div class="stat-value" :title="info?.usedQuota">{{ formatAmount(info?.usedQuota, 2, '0.00') }}</div>
       </div>
       <div class="stat-card stat-accent-violet">
         <div class="stat-label">用户分组</div>
@@ -77,6 +77,7 @@ import {useRouter} from 'vue-router'
 import {useUserStore} from '@/stores/user'
 import {updateProfile} from '@/api/user'
 import {getErrorMessage} from '@/api/request'
+import {formatAmount} from '@/utils/format'
 
 const userStore = useUserStore()
 const info = computed(() => userStore.userInfo)

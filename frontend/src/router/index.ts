@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ref } from 'vue'
 import { Message } from '@arco-design/web-vue'
 import {useUserStore} from '@/stores/user'
 // 下面是第一级路由的组件
@@ -137,6 +138,11 @@ const router = createRouter({
 // 全局前置守卫：需要登录的页面分级准入
 // - 未登录：唤起登录弹窗并中断跳转（登录成功后按 store 里记录的目标页跳回）
 // - 管理页（requiresAdmin）：非管理员拦截（访客与普通用户同权限，均可进入概览/密钥页）
+
+// 路由切换加载态：守卫里有 await（刷新后回源用户信息）时导航会挂起一段时间，
+// App.vue 的顶部进度条消费它给可见反馈，避免目标内容区看起来像"假死"
+export const routePending = ref(false)
+
 async function ensureUserInfo(userStore: ReturnType<typeof useUserStore>) {
     // 刷新页面后 store 里只有令牌没有用户信息，先拉一次（令牌无效会被拦截器清理并弹登录框）
     if (userStore.token && !userStore.userInfo) {
@@ -146,23 +152,29 @@ async function ensureUserInfo(userStore: ReturnType<typeof useUserStore>) {
 }
 
 router.beforeEach(async (to) => {
-    const userStore = useUserStore()
-    // requiresAuth 由父路由声明，子路由自动继承（控制台与监控面板都需要登录）
-    if (!to.meta.requiresAuth) return true
+    routePending.value = true
+    try {
+        const userStore = useUserStore()
+        // requiresAuth 由父路由声明，子路由自动继承（控制台与监控面板都需要登录）
+        if (!to.meta.requiresAuth) return true
 
-    if (!userStore.token) {
-        userStore.openAuthDialog('login', to.fullPath)
-        return false
+        if (!userStore.token) {
+            userStore.openAuthDialog('login', to.fullPath)
+            return false
+        }
+
+        const info = await ensureUserInfo(userStore)
+        if (!info) return false // 令牌已失效，拦截器已清理登录态并弹出登录框
+
+        if (to.meta.requiresAdmin && !info.isAdmin) {
+            Message.warning('需要管理员权限')
+            return false
+        }
+        return true
+    } finally {
+        // 无论放行还是中断都要熄掉进度条（被 return false 中断的导航不触发 afterEach）
+        routePending.value = false
     }
-
-    const info = await ensureUserInfo(userStore)
-    if (!info) return false // 令牌已失效，拦截器已清理登录态并弹出登录框
-
-    if (to.meta.requiresAdmin && !info.isAdmin) {
-        Message.warning('需要管理员权限')
-        return false
-    }
-    return true
 })
 
 export default router

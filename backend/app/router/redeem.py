@@ -16,21 +16,13 @@ from app.schemas.redeem_code import (
     RedeemRequestSchema,
 )
 from app.utils.auth import get_current_admin, get_current_user
+from app.utils.pagination import normalize_page
 from app.utils.response import success_response
 
 # 用户端：兑换与我的兑换记录（访客禁止兑换）
 redeem_router = APIRouter(prefix="/redeem", tags=["Redeem"])
 # 管理端：兑换码生成 / 管理 / 监控
 admin_router = APIRouter(prefix="/admin/redeem-codes", tags=["Admin"])
-
-
-def _normalize_page(page: int, page_size: int) -> tuple[int, int]:
-    """分页参数归一化（与 /admin/users 约定一致）"""
-    if page < 1:
-        page = 1
-    if page_size < 1 or page_size > 100:
-        page_size = 10
-    return page, page_size
 
 
 # ═══════════════════════ 用户端 ═══════════════════════
@@ -59,7 +51,7 @@ async def redeem_records(
         user=Depends(get_current_user),
 ):
     """我的兑换记录（已核销的码，按核销时间倒序）"""
-    page, page_size = _normalize_page(page, pageSize)
+    page, page_size = normalize_page(page, pageSize)
     records, total = await redeem_crud.list_user_records(db, user.id, page, page_size)
     data = [RedeemRecordSchema.model_validate(r).model_dump(by_alias=True, mode="json") for r in records]
     return success_response(message="获取兑换记录成功", data={"list": data, "total": total})
@@ -106,7 +98,7 @@ async def list_codes(
         admin=Depends(get_current_admin),
 ):
     """分页查询兑换码列表（可按状态 / 码值或使用人关键字 / 批次筛选）"""
-    page, page_size = _normalize_page(page, pageSize)
+    page, page_size = normalize_page(page, pageSize)
     codes, total = await redeem_crud.query_codes(db, page, page_size, status, keyword, batchNo)
     data = [RedeemCodeSchema.model_validate(c).model_dump(by_alias=True, mode="json") for c in codes]
     return success_response(message="获取兑换码列表成功", data={"list": data, "total": total})
