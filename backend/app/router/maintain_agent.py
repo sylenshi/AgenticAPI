@@ -3,14 +3,11 @@
 - POST /maintain-agent/chat：SSE 流式对话（OpenAI 风格报文，复刻工坊 /studio/chat 模式，
   站内扩展事件挂 agenticapi_agent 字段）——不走统一 {code,message,data} 格式；
 - POST /maintain-agent/approve：审批决议（confirm_required 卡片的批准/拒绝）；
-- GET/POST/PATCH/DELETE /maintain-agent/sessions*：会话管理（统一响应格式）；
-- GET /maintain-agent/exports/{token}：导出文件下载（一次性 token + 24h 过期）。
+- GET/POST/PATCH/DELETE /maintain-agent/sessions*：会话管理（统一响应格式）。
+（v0.11.0：导出下载端点随数据治理工具下线而删除）
 """
 
-import time
-
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import agent_setting
@@ -20,7 +17,6 @@ from app.crud import model as model_crud
 from app.crud import system_config as config_crud
 from app.router.deps import get_db
 from app.schemas.agent import AgentApproveSchema, AgentChatSchema, AgentSessionCreateSchema, AgentSessionUpdateSchema
-from app.services import export_service
 from app.services.agent import maintain_loop
 from app.services.agent.approvals import approval_manager
 from app.services.relay_service import RelayError
@@ -65,7 +61,7 @@ async def create_session(body: AgentSessionCreateSchema, db: AsyncSession = Depe
         db, user_id=admin.id, model_name=model_name, title=body.title or "新会话")
     return success_response(message="会话创建成功", data={
         "sessionId": session.id, "title": session.title, "modelName": session.model_name,
-        "autoApproveL1": bool(session.auto_approve_l1), "enableL2": bool(session.enable_l2),
+        "approvalMode": agent_crud.resolve_approval_mode(session),
         "createTime": str(session.create_time),
     })
 
@@ -76,7 +72,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db), admin=Depends(get_cu
     sessions = await agent_crud.list_sessions(db, admin.id)
     return success_response(message="ok", data={"list": [
         {"sessionId": s["id"], "title": s["title"], "modelName": s["model_name"],
-         "autoApproveL1": bool(s["auto_approve_l1"]), "enableL2": bool(s["enable_l2"]),
+         "approvalMode": agent_crud.resolve_approval_mode(s),
          "status": s["status"], "updateTime": str(s["update_time"])}
         for s in sessions
     ]})
@@ -101,7 +97,7 @@ async def list_messages(session_id: int, db: AsyncSession = Depends(get_db),
 @router.patch("/sessions/{session_id}")
 async def update_session(session_id: int, body: AgentSessionUpdateSchema,
                          db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
-    """更新会话设置：标题 / 驱动模型 / L1 自动批准 / L2 开关"""
+    """更新会话设置：标题 / 驱动模型 / 审批档位"""
     await _get_own_session(db, session_id, admin)
     update: dict = {}
     if body.title is not None:
@@ -111,10 +107,10 @@ async def update_session(session_id: int, body: AgentSessionUpdateSchema,
         if not model or not model.get("status"):
             raise HTTPException(status_code=404, detail=f"模型 {body.model_name} 不存在或已停用")
         update["model_name"] = body.model_name.strip()
-    if body.auto_approve_l1 is not None:
-        update["auto_approve_l1"] = 1 if body.auto_approve_l1 else 0
-    if body.enable_l2 is not None:
-        update["enable_l2"] = 1 if body.enable_l2 else 0
+    if body.approval_mode is not None:
+        if body.approval_mode not in agent_crud.APPROVAL_MODES:
+            raise HTTPException(status_code=400, detail=f"无效的审批档位：{body.approval_mode}")
+        update["approval_mode"] = body.approval_mode
     if update:
         await agent_crud.update_session(db, session_id, update)
     return success_response(message="会话已更新", data={"updatedFields": list(update.keys())})
@@ -163,17 +159,3 @@ async def approve(body: AgentApproveSchema, db: AsyncSession = Depends(get_db),
         db, type="admin", action="agent_approval", user_id=admin.id, username=admin.username,
         detail=f"审批 {body.approval_id} 决议：{result}")
     return success_response(message="ok", data={"approvalId": body.approval_id, "result": result})
-
-
-@router.get("/exports/{token}")
-async def download_export(token: str, db: AsyncSession = Depends(get_db),
-                          admin=Depends(get_current_admin)):
-    """导出文件下载（一次性 token，消费即失效；文件本体 24h 过期惰性清理）"""
-    path = export_service.consume_export(token)
-    if not path:
-        raise HTTPException(status_code=404, detail="下载链接无效、已使用或已过期（24h）")
-    await log_crud.write_log(
-        db, type="admin", action="agent_export_download", user_id=admin.id, username=admin.username,
-        detail=f"下载导出文件 {path.name}")
-    return FileResponse(path, filename=f"agenticapi-export-{time.strftime('%Y%m%d-%H%M%S')}.zip",
-                        media_type="application/zip")

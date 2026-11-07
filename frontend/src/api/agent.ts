@@ -154,8 +154,7 @@ export function listAgentMessages(sessionId: number) {
 export function updateAgentSession(sessionId: number, patch: Partial<{
     title: string
     modelName: string
-    autoApproveL1: boolean
-    enableL2: boolean
+    approvalMode: string
 }>) {
     return request.patch<{ updatedFields: string[] }>(`/maintain-agent/sessions/${sessionId}`, patch)
 }

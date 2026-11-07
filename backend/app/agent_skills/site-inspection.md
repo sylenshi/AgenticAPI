@@ -10,9 +10,8 @@ triggers: 巡检,体检,健康检查,健康报告,整体检查
 
 1. **渠道连通性**：对每个启用渠道做单模型抽查（`test_channel` scope=one）。发现失败渠道时记录，暂不深挖。
 2. **模型可用性**：执行 `generate_health_report`（含渠道抽查 + 模型快探 + 额度 + 存储），或分步执行 `test_all_models` 获取全量明细。
-3. **额度水位**：`get_upstream_usage` scope=all 读取各上游 5h/周/月窗口。
-4. **凭证有效期**：`get_token_expiry`，关注 daysLeft ≤ 7 的凭证。
-5. **存储水位**：`get_chat_record_stats` + `get_log_stats`，行数超 10 万或占用超 50MB 给出治理建议。
+3. **额度水位与凭证**：`get_upstream_status` scope=all 一次返回各上游 5h/周/月窗口用量与凭证到期（daysLeft ≤ 7 的凭证重点关注）。
+4. **存储水位**：`generate_health_report` 结果已含 chat_record / logs 统计；需单独核查时按 data-governance 技能脚本 A 用沙箱统计。
 
 ## 报告模板（严格遵守）
 

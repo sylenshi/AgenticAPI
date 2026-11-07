@@ -1,8 +1,8 @@
 """渠道管理域工具：A1 查询 / A2 连通性测试 / A3 配置修改 / A4 绑定一致性检查
-+ A5 新增 / A6 密钥轮换 / A7 删除（v0.10.0）
++ A5 新增 / A6 删除（v0.11.0 精简：密钥轮换下线，走管理页）
 
 密钥红线：A1 返回的渠道信息永不携带 api_key，仅 apiKeyHint（尾 4 位）；
-A2 的密钥注入发生在 probe_service 内部；A5/A6 的 api_key 仅在入参→service
+A2 的密钥注入发生在 probe_service 内部；A5 的 api_key 仅在入参→service
 落库路径上瞬时存在，审批卡与 agent_message 均为脱敏版本（registry 管线），
 工具返回值只带尾 4 位提示。
 """
@@ -250,39 +250,6 @@ async def create_channel(ctx: ToolContext, args: dict) -> dict:
     }
 
 
-async def _rotate_channel_key_preview(ctx: ToolContext, args: dict) -> str:
-    channel = await channel_crud.get_by_name(ctx.db, (args.get("channel_name") or "").strip())
-    if not channel:
-        return f"渠道 {args.get('channel_name')} 不存在（执行会被拒绝）"
-    key = args.get("api_key") or ""
-    new_hint = f"****{key[-4:]}" if len(key) >= 8 else "（无效过短密钥，执行会被拒绝）"
-    return (f"将轮换渠道「{channel['channel_name']}」的 API 密钥：\n"
-            f"· 旧密钥：{_key_hint(channel.get('api_key'))}\n"
-            f"· 新密钥：{new_hint}（明文不展示）\n"
-            f"· 上游 base_url 不变：{channel['base_url']}")
-
-
-async def rotate_channel_key(ctx: ToolContext, args: dict) -> dict:
-    """A6 渠道密钥轮换（L1 强制审批）：新密钥仅瞬时落库，不回显"""
-    channel_name = (args.get("channel_name") or "").strip()
-    api_key = (args.get("api_key") or "").strip()
-    if not await channel_crud.get_by_name(ctx.db, channel_name):
-        raise ValueError(f"渠道 {channel_name} 不存在，可用渠道见 list_channels 结果")
-    if len(api_key) < 8:
-        raise ValueError("api_key 至少 8 个字符")
-
-    try:
-        await channel_service.update_channel(
-            ctx.db, channel_name, ChannelSchema(api_key=api_key))
-    except HTTPException as exc:
-        raise ValueError(f"密钥轮换失败：{exc.detail}")
-    return {
-        "ok": True, "channel": channel_name, "apiKeyHint": _key_hint(api_key),
-        "hint": f"建议下一步：test_channel(channel_name='{channel_name}', scope='one') 验证新密钥",
-        "_summary": f"渠道「{channel_name}」密钥已轮换（新密钥尾4位 {_key_hint(api_key)}）",
-    }
-
-
 async def _delete_channel_preview(ctx: ToolContext, args: dict) -> str:
     """A7 审批卡预览：渠道信息 + 反向绑定影响（删除会产生孤儿引用的模型清单）"""
     channel_name = (args.get("channel_name") or "").strip()
@@ -391,15 +358,6 @@ def register_channel_tools() -> None:
             "description": {"type": "string", "description": "渠道描述（可选，≤200字）"},
         }, "required": ["channel_name", "base_url", "api_key", "support_models"]},
         risk="L1", handler=create_channel, always_confirm=True, preview=_create_channel_preview,
-    ))
-    register(ToolDef(
-        name="rotate_channel_key",
-        description="轮换渠道 API 密钥（L1 写操作，强制审批）：上游密钥过期/更换时使用，其他配置不变。审批卡与返回值仅显示新密钥尾4位。",
-        parameters={"type": "object", "properties": {
-            "channel_name": {"type": "string", "description": "渠道名（定位键）"},
-            "api_key": {"type": "string", "description": "新的上游 API 密钥（≥8 字符）"},
-        }, "required": ["channel_name", "api_key"]},
-        risk="L1", handler=rotate_channel_key, always_confirm=True, preview=_rotate_channel_key_preview,
     ))
     register(ToolDef(
         name="delete_channel",

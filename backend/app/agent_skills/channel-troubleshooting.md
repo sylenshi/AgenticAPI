@@ -12,7 +12,7 @@ triggers: 渠道故障,渠道报错,排障,打不通,上游错误
 2. **归因**：按四类逐一排查——
    - **连通性**：error 含 ConnectError/Timeout → 网络或上游宕机；
    - **凭证**：HTTP 401/403 → 渠道密钥失效（处置：引导管理员去渠道管理页手工换密钥，Agent 不经手密钥）；
-   - **额度**：HTTP 402/429 → 上游额度耗尽或限流，用 `get_upstream_usage` 确认水位；
+   - **额度**：HTTP 402/429 → 上游额度耗尽或限流，用 `get_upstream_status` 确认水位；
    - **模型映射**：仅个别模型失败而渠道其他模型正常 → 疑似 upstream_name 映射错误或渠道 support_models 配置漂移，用 `check_binding_consistency` 交叉确认。
 3. **处置建议**（按归因给出，写操作需走审批）：
    - 连通性差：建议 `update_channel` 调大 timeout（L1）或临时停用（L1）；

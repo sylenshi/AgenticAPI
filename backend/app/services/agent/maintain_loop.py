@@ -70,21 +70,26 @@ def _redact_arguments(raw: str) -> str:
 
 def build_system_prompt(session: dict) -> str:
     """system prompt：角色 + 安全规则 + 工具使用守则 + skill 目录（只注入目录不注入全文）"""
-    l2_state = "开启" if session.get("enable_l2") else "关闭（只读模式，L2 工具不可用）"
+    mode = session.get("approval_mode") or "confirm_all"
+    mode_desc = {
+        "full": "完全权限：所有工具（含 L2 高危与沙箱命令）免审批直接执行",
+        "confirm_critical": "部分审批：仅 L2 高危与强审名单（新增渠道/模型、技能保存/删除、沙箱命令）弹审批卡，其余低危写直行",
+        "confirm_all": "需要审批：所有 L1/L2 写操作都需管理员在审批卡片上确认",
+    }[mode]
     return f"""你是 AgenticAPI 中转站的管理员运维维护 Agent，通过白名单工具对站点进行查询、拨测、数据治理、渠道/模型管理与巡检。
 
 【安全规则（必须遵守）】
-1. 只能调用系统提供的白名单工具；唯一例外是 sandbox_exec——在隔离容器沙箱内执行命令，每条命令都需管理员审批（无未审批的 shell）；宿主机上没有任何命令执行能力；
-2. 渠道密钥等敏感信息永远不会出现在工具结果里，也不要尝试获取或输出它们；管理员在对话中提供的密钥仅可用于其明确要求的操作（如创建渠道、拨测），不要复述密钥明文；
-3. L1/L2 写操作需要管理员在审批卡片上确认；被拒绝后不要原样重试，先调整方案或说明理由；
-4. 清理与删除类工具（cleanup_* / delete_channel / delete_model）是两段式：第一次调用必须 dry_run=true 预览影响，向管理员展示预览并确认其同意后，再用 dry_run=false 真删；
+1. 只能调用系统提供的白名单工具；唯一例外是 sandbox_exec——在隔离容器沙箱内执行命令（是否弹审批由管理员设定的档位决定）；宿主机上没有任何命令执行能力；
+2. 渠道密钥等敏感信息永远不会出现在工具结果里，也不要尝试获取或输出它们；管理员在对话中提供的密钥仅可用于其明确要求的操作（如创建渠道、拨测），不要复述密钥明文；沙箱连库脚本严禁查询 llm_channels.api_key、user.password 等凭证列；
+3. 写操作的审批行为由当前会话档位决定（见下方会话状态）；被拒绝后不要原样重试，先调整方案或说明理由；
+4. 删除类工具（delete_channel / delete_model）是两段式：第一次调用必须 dry_run=true 预览影响，向管理员展示预览并确认其同意后，再用 dry_run=false 真删；沙箱内数据清理同样先 COUNT 预览、分批删除（每批 ≤5000 行），严禁 TRUNCATE/DROP；
 5. 不删除用户、不改用户余额——这些请引导管理员去对应管理页操作。
 
 【工作守则】
 - 工具失败会以 isError 数据返回：读错误信息修正参数后重试（如纠正渠道名拼写），或换一个途径；
 - 批量操作前先小范围抽查（如 test_channel scope=one），确认没问题再扩大范围；
 - 巡检/排障/治理等任务优先匹配下述技能目录，用 load_skill 读取 SOP 后按流程执行，偏离流程要说明理由；
-- 沙箱（sandbox_exec）是长尾兜底：定制工具能做的不要用沙箱做；需要测试任意 API 端点（给定 base_url/key/model）、拉取上游模型列表对比定价、跑脚本化诊断时才用它，命令保持简短幂等、输出大时用 head/tail/jq 截取；
+- 沙箱（sandbox_exec）兜底两类场景：①测试任意 API 端点、拉上游模型列表对比定价、脚本化诊断；②站内数据统计/导出/清理（容器内已注入站内 MySQL 连接环境变量与 pymysql，按 data-governance 技能脚本执行）；定制工具能做的不要用沙箱做，命令保持简短幂等、输出大时用 head/tail/jq 截取；
 - 新上游上线标准链路：create_channel（管理员提供密钥）→ test_channel 拨测 → create_model（含定价）→ test_model 端到端验证，各步审批卡会呈现完整配置；
 - 联网查证（上游故障公告/定价变更/报错信息）用 web_search；
 - 回答使用中文，运维数据用简洁结构化格式（表格/列表），金额保留 4 位小数。
@@ -93,8 +98,8 @@ def build_system_prompt(session: dict) -> str:
 {skill_service.catalog_text()}
 
 【当前会话状态】
-- 驱动模型：{session.get("model_name")}（可用 switch_model 工具切换为站内任意模型）
-- L2 高危工具：{l2_state}
+- 驱动模型：{session.get("model_name")}（切换驱动模型请让管理员使用页面顶部选择器，下一轮生效）
+- 审批档位：{mode_desc}
 - 管理员已知晓所有操作会被审计记录。"""
 
 
@@ -241,8 +246,7 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
     session_dict = {
         "id": session_id,
         "model_name": session.model_name,
-        "auto_approve_l1": bool(session.auto_approve_l1),
-        "enable_l2": bool(session.enable_l2),
+        "approval_mode": agent_crud.resolve_approval_mode(session),
     }
 
     # ── ① queue：落库用户消息，装配历史 ──
@@ -329,7 +333,7 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
                     tools_degraded = True
                     history.append({"role": "user", "content":
                                     "（系统提示：当前驱动模型不支持函数工具调用，本轮起仅可纯对话；"
-                                    "建议用 switch_model 切换到支持工具调用的模型后继续任务）"})
+                                    "建议让管理员在页面顶部选择器切换到支持工具调用的模型后继续任务）"})
                 headers = {"Authorization": f"Bearer {channel['api_key']}"}
             else:
                 client = httpx.AsyncClient(timeout=httpx.Timeout(channel.get("timeout") or 30))
@@ -398,7 +402,10 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
 
             yield _agent_event({"type": "round_end", "round": round_no,
                                 "usageSoFar": {"promptTokens": usage_total["prompt"],
-                                               "completionTokens": usage_total["completion"]}})
+                                               "completionTokens": usage_total["completion"]},
+                                # 上下文水位口径：最近一轮官方 prompt_tokens ≈ 当前上下文真实占用
+                                #（usageSoFar 是累计消耗，含已被脱水的历史，不能当水位用）
+                                "contextTokens": last_prompt_tokens})
 
             if not calls:
                 break  # 纯文本作答 → 结束

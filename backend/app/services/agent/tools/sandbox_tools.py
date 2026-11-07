@@ -1,8 +1,10 @@
-"""沙箱域工具：S1 sandbox_exec（审批式任意命令）/ S2 sandbox_status（状态查询）
+"""沙箱域工具：S1 sandbox_exec（任意命令）/ S2 sandbox_status（状态查询）
 
 v0.10.0 决策：突破「无 shell」红线 → 修订为「无未审批的 shell」。沙箱为全站
-共享单容器（懒启动 + 空闲自停），以 always_confirm 强制每条命令弹审批卡
-（卡片 args 区展示完整命令），隔离与限额见 sandbox_service 模块注释。
+共享单容器（懒启动 + 空闲自停），审批卡展示完整命令；v0.11.0 起每条命令是否
+弹卡由会话审批档位决定（confirm_all/confirm_critical 档必弹、full 档直行），
+隔离与限额见 sandbox_service 模块注释。v0.11.0 镜像加装 pymysql 并可注入站内
+MySQL 连接环境变量（SANDBOX_MYSQL_HOST 配置，data-governance 技能依赖）。
 """
 
 from app.core.config import sandbox_setting
@@ -58,10 +60,11 @@ async def sandbox_status(ctx: ToolContext, args: dict) -> dict:
 def register_sandbox_tools() -> None:
     register(ToolDef(
         name="sandbox_exec",
-        description=("在隔离的 Linux 容器沙箱内执行任意 shell 命令（强制审批，每条命令弹卡）。"
-                     "内置 curl / jq / python3(+httpx)，可访问公网。适用场景：测试任意 API 端点"
+        description=("在隔离的 Linux 容器沙箱内执行任意 shell 命令（审批卡展示完整命令，是否弹卡由会话审批档位决定）。"
+                     "内置 curl / jq / python3(+httpx/pymysql)，可访问公网；已注入站内 MySQL 连接环境变量"
+                     "（MYSQL_HOST/PORT/USER/PASSWORD/DATABASE，数据治理用，严禁查询凭证列）。适用场景：测试任意 API 端点"
                      "（如给定 base_url+key+model 直发请求验证可用性）、拉取上游 /v1/models 对比定价、"
-                     "脚本化批量诊断等定制工具未覆盖的长尾需求。文件在 /workspace/s{会话id} 下跨命令保留"
+                     "脚本化批量诊断、站内数据统计/治理脚本。文件在 /workspace/s{会话id} 下跨命令保留"
                      "（容器空闲自停后清空）。使用守则：优先使用站内定制工具（更快更安全），沙箱仅作兜底；"
                      "命令保持幂等可读；输出过大时用 head/tail/jq 截取。"),
         parameters={"type": "object", "properties": {

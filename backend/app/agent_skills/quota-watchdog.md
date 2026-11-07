@@ -8,7 +8,7 @@ triggers: 额度,水位,配额,余量,快用完了
 
 ## 数据获取
 
-`get_upstream_usage`（scope=all，antigravity 走缓存秒回）+ `get_token_expiry`。
+`get_upstream_status`（scope=all，antigravity 走缓存秒回）——一次返回各上游用量与凭证到期（tokenExpiry 字段）。
 
 ## 解读口径（与运维页一致）
 
@@ -25,7 +25,7 @@ triggers: 额度,水位,配额,余量,快用完了
 
 ## 临期凭证提醒
 
-`get_token_expiry` 中 daysLeft ≤ 7 的凭证单独列出：`⚠ 凭证 X 将于 Y 后过期（剩 N 天），请及时更新`。
+`get_upstream_status` 返回的 tokenExpiry.credentials 中 daysLeft ≤ 7 的凭证单独列出：`⚠ 凭证 X 将于 Y 后过期（剩 N 天），请及时更新`。
 
 ## 报告模板
 

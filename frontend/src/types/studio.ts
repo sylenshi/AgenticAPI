@@ -1,6 +1,6 @@
 // 模型工坊相关类型（会话与参数只存浏览器 localStorage，不上服务端）
 
-import type {agentConfirmState, agentDownload, agentToolEvent} from './agent'
+import type {agentConfirmState, agentToolEvent} from './agent'
 
 /** 输入框里的图片附件（base64 data URL，随用户消息一起保存） */
 export interface studioImage {
@@ -42,8 +42,6 @@ export interface studioMessage {
     toolEvents?: agentToolEvent[]
     /** 维护 Agent 专属：审批卡片状态 */
     confirm?: agentConfirmState
-    /** 维护 Agent 专属：导出文件下载卡片 */
-    downloads?: agentDownload[]
     createTime: number
 }
 

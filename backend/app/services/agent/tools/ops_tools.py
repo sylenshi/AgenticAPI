@@ -1,7 +1,8 @@
-"""运营速查域工具（E1~E4）+ F1 一键巡检报告：全部只读
+"""运营速查域工具（E1~E2）+ F1 一键巡检报告：全部只读
+（v0.11.0 精简：兑换码统计 / 用户查询下线，走监控页与用户管理页）
 
 数据源复用既有口径：usage_summary 单行 / logs 聚合 / usage_stats 预聚合 /
-redeem_crud.code_stats / user 表 COUNT——不对原始大表做全量扫描。
+user 表 COUNT——不对原始大表做全量扫描。
 """
 
 import asyncio
@@ -9,7 +10,6 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import text
 
-from app.crud import redeem_code as redeem_crud
 from app.crud import usage_stats as stats_crud
 from app.services.agent.registry import ToolContext, ToolDef, register
 from app.services.agent.tools.data_tools import _table_stats
@@ -84,49 +84,6 @@ async def get_usage_trend(ctx: ToolContext, args: dict) -> dict:
         "seriesRows": series,
         "topModels": [{"model": name, **st} for name, st in top5],
         "_summary": f"趋势已获取（{granularity} 粒度，{len(series)} 行序列，Top5 模型已摘要）",
-    }
-
-
-async def get_redeem_stats(ctx: ToolContext, args: dict) -> dict:
-    """E3 兑换码统计（复用管理端 /admin/redeem-codes/stats 的 service 层口径）"""
-    stats = await redeem_crud.code_stats(ctx.db)
-    if isinstance(stats, dict):
-        stats["_summary"] = "兑换码监控统计已获取（发行/未使用/已使用/核销金额）"
-    return stats
-
-
-async def query_users(ctx: ToolContext, args: dict) -> dict:
-    """E4 用户查询（只读）：搜索 / 余额排行 / 封禁名单。改余额封禁请走用户管理页。"""
-    keyword = (args.get("keyword") or "").strip()
-    order_by = args.get("order_by") or "id"
-    banned_only = bool(args.get("banned_only"))
-    limit = min(int(args.get("limit") or 10), 50)
-    if order_by not in ("id", "balance"):
-        raise ValueError("order_by 仅支持 id / balance")
-
-    conditions, params = [], {}
-    if keyword:
-        conditions.append("(username LIKE :kw OR nickname LIKE :kw)")
-        params["kw"] = f"%{keyword}%"
-    if banned_only:
-        conditions.append("status = 0")
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    order = "balance DESC" if order_by == "balance" else "id DESC"
-
-    rows = (await ctx.db.execute(text(f"""
-        SELECT id, username, nickname, user_group, is_admin, is_guest, status,
-               balance, used_quota, last_login_time, create_time
-        FROM user {where} ORDER BY {order} LIMIT :limit
-    """), {**params, "limit": limit})).mappings().all()
-    total = (await ctx.db.execute(text(f"SELECT COUNT(*) FROM user {where}"), params)).scalar_one()
-
-    return {
-        "total": total,
-        "returned": len(rows),
-        "users": [{**dict(r), "balance": f"{float(r['balance']):.4f}",
-                   "used_quota": f"{float(r['used_quota']):.4f}"} for r in rows],
-        "_summary": f"用户查询：命中 {total} 条（展示 {len(rows)}，排序 {order_by}）"
-                    + ("，仅封禁用户" if banned_only else ""),
     }
 
 
@@ -216,23 +173,6 @@ def register_ops_tools() -> None:
             "granularity": {"type": "string", "enum": ["hour", "day", "week", "month"], "description": "粒度，默认 day"},
         }, "required": []},
         risk="L0", handler=get_usage_trend, timeout=60,
-    ))
-    register(ToolDef(
-        name="get_redeem_stats",
-        description="兑换码统计：发行量/未使用/已使用/已核销金额四卡数据。",
-        parameters={"type": "object", "properties": {}, "required": []},
-        risk="L0", handler=get_redeem_stats,
-    ))
-    register(ToolDef(
-        name="query_users",
-        description="用户查询（只读）：按用户名/昵称搜索、余额排行、封禁名单。修改余额/封禁请走用户管理页。",
-        parameters={"type": "object", "properties": {
-            "keyword": {"type": "string", "description": "用户名/昵称模糊搜索（可选）"},
-            "order_by": {"type": "string", "enum": ["id", "balance"], "description": "排序键，默认 id"},
-            "banned_only": {"type": "boolean", "description": "仅看封禁用户，默认 false"},
-            "limit": {"type": "integer", "description": "返回条数上限（默认 10，最大 50）"},
-        }, "required": []},
-        risk="L0", handler=query_users,
     ))
     register(ToolDef(
         name="generate_health_report",

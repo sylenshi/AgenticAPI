@@ -15,14 +15,15 @@ ARG PIP_INDEX_URL=https://pypi.org/simple
 # 换国内源，如 mirrors.cloud.tencent.com；同时覆盖 sources.list 与 debian.sources）。
 ARG APT_MIRROR=deb.debian.org
 
-# curl/jq：API 拨测与 JSON 处理；httpx：异步 HTTP 脚本；ca-certificates：HTTPS
+# curl/jq：API 拨测与 JSON 处理；httpx：异步 HTTP 脚本；pymysql：站内数据库统计/治理脚本（v0.11.0）；
+# ca-certificates：HTTPS
 RUN set -eux; \
     for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
         [ -f "$f" ] && sed -i "s|deb.debian.org|${APT_MIRROR}|g" "$f" || true; \
     done; \
     apt-get update && apt-get install -y --no-install-recommends curl jq ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --index-url ${PIP_INDEX_URL} httpx
+    && pip install --no-cache-dir --index-url ${PIP_INDEX_URL} httpx pymysql
 
 # 非 root 运行（配合宿主侧 -u 1000:1000 / --cap-drop ALL / --read-only）
 RUN useradd -m -u 1000 sandbox

@@ -30,7 +30,7 @@ export type {
     agentStreamEvent,
     agentToolEvent,
     agentConfirmState,
-    agentDownload,
+    agentApprovalMode,
     agentSession,
     agentServerMessage,
 } from './agent'

@@ -3,12 +3,14 @@
 密钥闭环红线：渠道密钥仅存在于后端内存与 llm_channels 表，任何工具返回值
 必须经过 redact() 后才能流向三处出口（模型上下文、前端、agent_message 落库）。
 匹配规则：键名（不区分大小写）命中敏感词，或字符串值形如长密钥（sk- / Bearer 开头）；
-v0.10.0 起补充子串级匹配——长文本（如沙箱命令）内嵌的 sk-/Bearer 凭证同样掩码。
+v0.10.0 起补充子串级匹配——长文本（如沙箱命令）内嵌的 sk-/Bearer 凭证同样掩码；
+v0.11.0 补充 mysql://user:pass@ 连接串掩码（沙箱 MySQL 桥接后可能出现在命令/输出里，
+注入容器的 MYSQL_PASSWORD 经键名 password 规则天然命中）。
 """
 
 import re
 
-# 键名命中即脱敏（小写比较）：覆盖常见密钥/凭证字段命名
+# 键名命中即脱敏（小写比较）：覆盖常见密钥/凭证字段命名（MYSQL_PASSWORD 含 password 命中）
 SENSITIVE_KEY_PATTERNS = (
     "api_key", "apikey", "api-key",
     "token", "access_token", "refresh_token",
@@ -21,6 +23,9 @@ _SECRET_VALUE_RE = re.compile(r"^(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S{8,}|[A-Za-z0
 # 子串级密钥形态（v0.10.0）：长文本内嵌的凭证只匹配高置信前缀（sk- / Bearer），
 # 不做 32 位随机串子串匹配——避免误伤命令里的长文件名/URL 路径段
 _SECRET_SUB_RE = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+[A-Za-z0-9_\-.=/+]{8,})")
+
+# mysql:// / mysql+asyncmy:// 连接串中嵌入的密码段（v0.11.0）
+_MYSQL_URI_RE = re.compile(r"(mysql(?:\+asyncmy)?://[^:/@\s]+:)([^@\s/]+)(@)")
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -58,8 +63,11 @@ def redact(data):
         stripped = data.strip()
         if _SECRET_VALUE_RE.match(stripped):
             return _mask_value(stripped)
+        if _MYSQL_URI_RE.search(data):
+            data = _MYSQL_URI_RE.sub(lambda m: f"{m.group(1)}****{m.group(3)}", data)
         if _SECRET_SUB_RE.search(data):
             return _SECRET_SUB_RE.sub(lambda m: _mask_value(m.group(0)), data)
+        return data
     return data
 
 

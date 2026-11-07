@@ -1,13 +1,14 @@
 """工具注册表与执行器流水线（唯一扩展点）
 
 每次工具调用必经的流水线：
-  JSON 参数解析 → 必填字段校验 → 风险阀门（L0 直行 / L1·L2 审批）
+  JSON 参数解析 → 必填字段校验 → 风险阀门（按会话审批档位）
   → asyncio 超时执行 → redact() 递归脱敏 → 8KB 摘要式截断 → logs 审计。
 
-风险分级：
-- L0 只读：直接执行；
-- L1 低危写：审批卡片，会话开启 auto_approve_l1 时可跳过（always_confirm 工具除外）；
-- L2 高危写：强制审批 + 会话内执行上限 5 次（enable_l2 关闭时工具不注入）。
+风险分级（工具自身属性，审批卡展示用）与会话审批档位（三档，v0.11.0）：
+- L0 只读：任何档位都直接执行；
+- confirm_all（需要审批，默认）：L1/L2 全部弹审批卡；
+- confirm_critical（部分审批）：仅 L2 与 always_confirm 强审名单弹卡，其余 L1 直行；
+- full（完全权限）：全部免审批（L2 每会话 5 次上限保留，属护栏非审批）。
 
 Error as Data：任何失败都不抛异常给主循环，统一返回 {isError: true, message}。
 注册方向：registry 只定义框架（本文件不 import 任何工具域）；各工具域模块
@@ -27,7 +28,7 @@ from app.services.agent.redact import redact
 
 # 结果序列化上限：超出做"摘要式截断"（保留首尾条目 + 计数），明细走导出文件
 RESULT_MAX_BYTES = 8 * 1024
-# L2 工具每会话执行上限
+# L2 工具每会话执行上限（护栏，与审批档位无关，full 档同样生效）
 L2_PER_SESSION_LIMIT = 5
 
 
@@ -44,8 +45,8 @@ class ToolContext:
     """一次会话流内的工具执行上下文（由主循环构造）"""
     db: AsyncSession
     user: Any                      # 管理员 UserTabel（含 id/username/is_admin）
-    session: dict                  # {id, model_name, auto_approve_l1, enable_l2}
-    emit: Callable[[dict], Awaitable[None]]  # SSE 事件回调（tool_progress / model_switched 等）
+    session: dict                  # {id, model_name, approval_mode}
+    emit: Callable[[dict], Awaitable[None]]  # SSE 事件回调（tool_progress / sandbox_output 等）
     l2_used: int = 0               # 本会话已执行的 L2 次数（含历史，主循环预填）
     extra_secrets: list = field(default_factory=list)  # 已知密钥明文（redact_text 兜底用）
 
@@ -148,16 +149,18 @@ async def _validate_required(tool: ToolDef, args: dict) -> str | None:
 
 
 async def _run_with_gate(ctx: ToolContext, tool: ToolDef, args: dict) -> Any:
-    """风险阀门 + 超时执行（不含参数校验与序列化）"""
-    if tool.risk == "L2" and not ctx.session.get("enable_l2"):
-        raise PermissionError("本会话已关闭 L2 高危工具（只读模式），如需执行请在右侧面板打开 L2 开关")
-
+    """风险阀门 + 超时执行（不含参数校验与序列化）。审批行为由会话三档位决定。"""
     if tool.risk == "L2" and ctx.l2_used >= L2_PER_SESSION_LIMIT:
         raise PermissionError(
             f"本会话 L2 高危操作已达上限（{L2_PER_SESSION_LIMIT} 次），请改走管理页操作或新建会话")
 
-    # 是否需要审批卡片：L2 恒审；L1 默认审，会话开启自动批准可跳过（always_confirm 除外）
-    need_approval = tool.risk == "L2" or tool.always_confirm or not ctx.session.get("auto_approve_l1")
+    mode = ctx.session.get("approval_mode") or "confirm_all"
+    if mode == "full":
+        need_approval = False                     # 完全权限：全部直行（含 L2 与强审名单）
+    elif mode == "confirm_critical":
+        need_approval = tool.risk == "L2" or tool.always_confirm  # 部分审批：仅高危+强审名单
+    else:
+        need_approval = tool.risk != "L0"         # 需要审批（默认）：L1/L2 全弹卡
 
     if tool.risk != "L0" and need_approval:
         impact = ""
@@ -239,19 +242,14 @@ async def execute_tool(ctx: ToolContext, name: str, arguments_raw: str) -> ToolE
                          risk=tool.risk, approval_status=approval_status)
 
 
-def tools_payload_for(session: dict) -> list[dict]:
-    """按会话设置裁剪注入模型的 tools 列表（enable_l2 关闭 = 只读模式，不注入 L2）"""
+def tools_payload_for(session: dict | None = None) -> list[dict]:
+    """注入模型的 tools 列表（v0.11.0：全部工具恒注入，审批行为由会话档位在阀门处控制）"""
     _ensure_tools_loaded()
-    payload = []
-    for tool in TOOL_REGISTRY.values():
-        if tool.risk == "L2" and not session.get("enable_l2"):
-            continue
-        payload.append({
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            },
-        })
-    return payload
+    return [{
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        },
+    } for tool in TOOL_REGISTRY.values()]

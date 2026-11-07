@@ -143,6 +143,17 @@ class SandboxSettings(BaseSettings):
     # 单条命令超时上限（秒）
     SANDBOX_CMD_TIMEOUT_MAX: int = 120
 
+    # ── 沙箱-MySQL 桥接（v0.11.0：数据治理技能在沙箱内跑 pymysql 脚本）──
+    # SANDBOX_MYSQL_HOST 留空 = 不注入（容器与数据库隔离，行为同 v0.10.0）；配置后按三种取值接入：
+    #   "host"            经 host-gateway 访问宿主机（Docker Desktop 可达宿主回环服务，本地开发用）
+    #   "container:<名称>" 把沙箱接入该 MySQL 容器所在网络并以容器名直连（服务器 MySQL 只绑回环也能通）
+    #   其他值             当作主机名/IP 直连（同时注入 host-gateway 解析，可写 host.docker.internal）
+    # 连接凭证默认复用 MysqlSettings（MYSQL_USER/MYSQL_PASSWORD/MYSQL_PORT/MYSQL_DATABASE），
+    # 可用以下两项覆盖（如为沙箱单独建最小权限账号）：
+    SANDBOX_MYSQL_HOST: str = ""
+    SANDBOX_MYSQL_USER: str = ""
+    SANDBOX_MYSQL_PASSWORD: str = ""
+
 
 agent_setting = AgentSettings()
 setting = MysqlSettings()

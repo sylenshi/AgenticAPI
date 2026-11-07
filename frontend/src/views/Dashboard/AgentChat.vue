@@ -25,7 +25,7 @@
         <div v-else class="chat-empty chat-empty-session">
           <icon-robot class="empty-icon"/>
           <h3>新会话已就绪</h3>
-          <p>在下方输入框描述运维目标即可开始，例如：<br>「巡检全部渠道并把异常的停用」「导出用户表最近 7 天数据」</p>
+          <p>在下方输入框描述运维目标即可开始，例如：<br>「巡检全部渠道并把异常的停用」「统计 logs 表占用并清理 90 天前的日志」</p>
         </div>
         <AgentInput :is-streaming="agentStore.isStreaming"
                     @send="(text) => agentStore.send(text)" @stop="agentStore.stop()"/>
@@ -35,8 +35,8 @@
       <div v-else class="chat-empty">
         <icon-robot class="empty-icon"/>
         <h3>站点维护 Agent</h3>
-        <p>用一句话完成复合运维：测渠道、巡检模型、查额度水位、导出并清理数据表。<br>
-          高危操作（L2 清理）会弹出审批卡片，经你确认后才会执行。</p>
+        <p>用一句话完成复合运维：测渠道、巡检模型、查额度水位、统计并清理数据表。<br>
+          写操作是否弹审批卡由右侧「审批档位」决定，L2 高危清理默认必弹。</p>
         <a-button type="primary" @click="agentStore.createSession()">开始新会话</a-button>
       </div>
     </section>
@@ -73,23 +73,28 @@
       </div>
 
       <div class="panel-section">
-        <div class="panel-title">会话设置</div>
-        <div class="panel-row">
-          <div class="panel-label">
-            <span>L1 自动批准</span>
-            <span class="panel-desc">低危写操作免审批</span>
+        <div class="panel-title">审批档位</div>
+        <a-select :model-value="agentStore.currentSession?.approvalMode || 'confirm_all'" size="small"
+                  :style="{width: '100%'}"
+                  @change="(v: any) => agentStore.patchSession({approvalMode: String(v)})">
+          <a-option value="confirm_all">需要审批</a-option>
+          <a-option value="confirm_critical">部分审批</a-option>
+          <a-option value="full">完全权限</a-option>
+        </a-select>
+        <div class="panel-desc approval-mode-desc">{{ approvalModeDesc }}</div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-title">上下文水位</div>
+        <template v-if="contextLength">
+          <a-progress :percent="contextPercent" size="small" :show-text="false" :status="contextStatus"/>
+          <div class="context-text">
+            {{ formatTokens(agentStore.contextTokens || 0) }} / {{ formatTokens(contextLength) }} tokens
+            （{{ Math.round(contextPercent * 100) }}%）
           </div>
-          <a-switch :model-value="agentStore.currentSession?.autoApproveL1" size="small"
-                    @change="(v: any) => agentStore.patchSession({autoApproveL1: !!v})"/>
-        </div>
-        <div class="panel-row">
-          <div class="panel-label">
-            <span>L2 高危工具</span>
-            <span class="panel-desc">关闭即只读模式</span>
-          </div>
-          <a-switch :model-value="agentStore.currentSession?.enableL2" size="small"
-                    @change="(v: any) => agentStore.patchSession({enableL2: !!v})"/>
-        </div>
+          <div class="panel-desc">≥70% 橙色（触发历史压缩），≥90% 红色</div>
+        </template>
+        <div v-else class="panel-desc">当前驱动模型未配置上下文窗口长度，暂无水位读数</div>
       </div>
 
       <div class="panel-section">
@@ -151,39 +156,69 @@ const usageHtml = md.render(`
 - **随时换脑**：右上角选择器可切换站内任意启用模型，**下一轮生效**，上下文不丢失
 
 ### 怎么下达任务
-- 一句话描述目标即可，无需拆步骤：\`出一份巡检报告\`、\`测一遍所有渠道\`、\`glm-5.3 最近一周调用趋势怎么样\`
+- 一句话描述目标即可，无需拆步骤：\`出一份巡检报告\`、\`测一遍所有渠道\`、\`统计 logs 表占用并清理 90 天前的日志\`
 - 复合任务它会自己规划多步：\`检查所有模型可用性，然后告诉我哪些渠道有问题\`
 
 ### 内置技能（SOP）
 - 已内置六个运维 SOP：**站点巡检 / 数据治理 / 渠道排障 / 额度水位研判 / 新模型上线 / 故障复盘**，自然语言即可触发
-- **教它新技能**：口述内容让它保存（"记住一个叫 xxx 的技能：……"）；保存与删除都弹审批卡片，**开启 L1 自动批准也不豁免**
+- **教它新技能**：口述内容让它保存（"记住一个叫 xxx 的技能：……"）；保存与删除属于强审名单，弹卡与否由审批档位决定
 
-### 数据导出与清理
-- 导出（对话记录 / 日志 / 统计表）返回**一次性下载链接**：24 小时有效、仅可下载一次，请及时保存
-- 清理走**两段式**：先 dry-run 预览将删的行数与时间范围 → 你批准后才真删；可先导出备份再清理
+### 数据治理（沙箱连库）
+- 数据统计 / 清理由它在**容器沙箱**内跑数据库脚本完成（技能：data-governance）；先统计与预览，你确认后才分批删除
+- 大数据全量导出沙箱拿不出来（输出上限 64KB），需要时登服务器用 mysqldump
 `)
 const safetyHtml = md.render(`
-### 工具风险分级（共 27 个白名单工具）
+### 工具风险分级（共 23 个白名单工具）
 | 等级 | 范围 | 执行方式 |
 | --- | --- | --- |
-| **L0 只读**（19 个） | 巡检 / 统计 / 拨测 / 查询 / 切模型 | 直接执行，不打扰 |
-| **L1 低危写**（5 个） | 渠道改配置 / 数据导出 / 技能保存删除 | 弹审批卡片，可开**会话级自动批准** |
-| **L2 高危写**（3 个） | 数据表清理（日志 / 对话记录 / 统计） | **强制人工审批**，无法自动批准 |
+| **L0 只读**（15 个） | 巡检 / 统计 / 拨测 / 查询 | 直接执行，不打扰 |
+| **L1 低危写**（4 个） | 渠道改配置 / 技能保存删除 | 按审批档位弹卡或直行 |
+| **L2 高危写**（2 个） | 删除渠道 / 删除模型（两段式 dry-run） | 默认必弹审批卡 |
+
+### 审批档位（右侧面板可切换）
+- **需要审批**（默认）：所有写操作都弹审批卡
+- **部分审批**：仅 L2 高危 + 沙箱命令 + 强审名单（新增渠道/模型、技能保存/删除）弹卡，其余低危写直行
+- **完全权限**：全部直行不弹卡（风险自担，审计照常）
 
 ### 硬性护栏
-- L2 每会话**最多 5 次**真删；审批卡片 **300 秒**未操作自动按拒绝处理
-- 关闭右侧「L2 高危工具」即进入**只读模式**：高危工具根本不会注入给模型，它"不知道"有这些工具
+- L2 每会话**最多 5 次**真删（任何档位都生效）；审批卡片 **300 秒**未操作自动按拒绝处理
+- 删除渠道 / 模型走**两段式**：先 dry-run 预览影响 → 你批准后才真删
 - 单轮对话上限 24 次工具调用、上下文 200k token，超限自动收敛结束
 
 ### 密钥与审计
 - 渠道密钥**全程递归脱敏**：界面只显示掩码（如 \`sk-1****wxyz\`），数据库与前端均不存密钥原文
 - **双轨留痕**：每次工具调用（参数 + 结果摘要）与每次审批决定（批准 / 拒绝 / 超时）均写入审计日志，可在「监控面板 → 调用日志」按管理员筛选追溯
-- 它没有 shell、没有任意命令执行、没有通用文件访问，只能调用上表中的白名单工具
+- 宿主机侧没有 shell 与通用文件访问；唯一例外是容器沙箱 \`sandbox_exec\`（隔离加固，数据库凭证以环境变量注入，输出经脱敏）
 `)
 
 /** 模型选择器数据：站内启用中的出站模型（管理员 vip 全量可用） */
 const availableModels = computed(() =>
     (modelListStore.totalModelList || []).filter(m => (m as any).status !== 0))
+
+/** ═══════════ 审批档位（v0.11.0 三档位）═══════════ */
+const approvalModeDesc = computed(() => ({
+  confirm_all: '需要审批：所有写操作（含沙箱命令）都弹审批卡',
+  confirm_critical: '部分审批：仅 L2 高危、沙箱命令与强审名单弹卡，其余低危写直行',
+  full: '完全权限：全部直行不弹卡（L2 每会话 5 次上限仍生效）',
+}[agentStore.currentSession?.approvalMode || 'confirm_all']))
+
+/** ═══════════ 上下文水位（17.1：窗口上限 × 最近一轮 prompt_tokens）═══════════ */
+const currentModelInfo = computed(() =>
+    availableModels.value.find(m => m.name === agentStore.currentModel))
+const contextLength = computed(() => (currentModelInfo.value as any)?.contextLength || 0)
+const contextPercent = computed(() => {
+  const used = agentStore.contextTokens || 0
+  return contextLength.value > 0 ? Math.min(1, used / contextLength.value) : 0
+})
+const contextStatus = computed(() => {
+  if (contextPercent.value >= 0.9) return 'danger'
+  if (contextPercent.value >= 0.7) return 'warning'
+  return 'normal'
+})
+/** token 读数千分位（无读数时显示 0） */
+function formatTokens(n: number): string {
+  return Math.round(n || 0).toLocaleString()
+}
 
 onMounted(async () => {
   loading.value = true
@@ -450,6 +485,20 @@ async function confirmClear() {
 .panel-desc {
   font-size: 11px;
   color: var(--color-text-muted);
+}
+
+/* 审批档位说明：独占一行，与下拉拉开 6px 间距 */
+.approval-mode-desc {
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+/* 上下文水位读数行：进度条下方的已用/上限明细 */
+.context-text {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .risk-legend {

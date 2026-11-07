@@ -1,5 +1,8 @@
 // 站点维护 Agent 相关类型（会话与消息服务端持久化，与工坊的 localStorage 模式不同）
 
+/** 审批档位（v0.11.0 三档位，取代旧 autoApproveL1/enableL2 两开关） */
+export type agentApprovalMode = 'confirm_all' | 'confirm_critical' | 'full'
+
 /** 后端 agenticapi_agent 扩展事件（SSE 站内扩展字段的联合类型） */
 export type agentStreamEvent =
     | { type: 'tool_start'; tool: string; digest?: string }
@@ -9,8 +12,7 @@ export type agentStreamEvent =
     | { type: 'confirm_required'; approvalId: string; tool: string; args: Record<string, unknown>; impact: string; riskLevel: string; expiresIn: number }
     | { type: 'confirm_resolved'; approvalId: string; result: 'approved' | 'rejected' | 'timeout' }
     | { type: 'model_switched'; from: string; to: string }
-    | { type: 'round_end'; round: number; usageSoFar: { promptTokens: number; completionTokens: number } }
-    | { type: 'download_ready'; url: string; label: string; size: string; expiresAt: string }
+    | { type: 'round_end'; round: number; usageSoFar: { promptTokens: number; completionTokens: number }; contextTokens?: number }
 
 /** 消息内渲染的工具执行记录（tool_start/progress/end 聚合） */
 export interface agentToolEvent {
@@ -39,21 +41,12 @@ export interface agentConfirmState {
     expiresIn?: number
 }
 
-/** 导出文件下载卡片 */
-export interface agentDownload {
-    url: string
-    label: string
-    size: string
-    expiresAt: string
-}
-
 /** 服务端会话 */
 export interface agentSession {
     sessionId: number
     title: string
     modelName: string
-    autoApproveL1: boolean
-    enableL2: boolean
+    approvalMode: agentApprovalMode
     status?: string
     updateTime?: string
 }

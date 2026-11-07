@@ -18,6 +18,24 @@ from app.models.agent_session import AgentSessionTable
 MAX_SESSIONS_PER_USER = 50
 SESSION_KEEP_DAYS = 30
 
+# 审批档位合法值（v0.11.0 三档位，取代旧 auto_approve_l1 / enable_l2 两开关）
+APPROVAL_MODES = ("confirm_all", "confirm_critical", "full")
+
+
+def resolve_approval_mode(session) -> str:
+    """解析会话审批档位：approval_mode 列优先；旧数据列缺失/空值时由旧开关推导。
+
+    兼容 ORM 行与原生查询 dict 两种载体（get_session 返回 ORM 行、list_sessions 返回 dict）。
+    推导规则：旧 auto_approve_l1=True → confirm_critical（部分审批），否则 confirm_all（需要审批）。
+    """
+    mode = (session.get("approval_mode") if isinstance(session, dict)
+            else getattr(session, "approval_mode", None)) or ""
+    if mode in APPROVAL_MODES:
+        return mode
+    legacy = (session.get("auto_approve_l1") if isinstance(session, dict)
+              else getattr(session, "auto_approve_l1", 0))
+    return "confirm_critical" if legacy else "confirm_all"
+
 
 async def insert_message(
     db: AsyncSession,
@@ -98,7 +116,7 @@ async def list_sessions(db: AsyncSession, user_id: int) -> list[dict]:
     """用户维度的会话列表（最近优先）"""
     result = await db.execute(
         text("""
-            SELECT id, user_id, title, model_name, auto_approve_l1, enable_l2, status,
+            SELECT id, user_id, title, model_name, approval_mode, auto_approve_l1, enable_l2, status,
                    create_time, update_time
             FROM agent_session WHERE user_id = :uid ORDER BY id DESC
         """),

@@ -88,6 +88,8 @@ export const useAgentStore = defineStore('agent', () => {
     /** 当前会话的 UI 消息（服务端历史的展示态 + 本轮流式增量） */
     const messages = ref<studioMessage[]>([])
     const isStreaming = ref(false)
+    /** 当前上下文占用（最近一轮 prompt_tokens，round_end 更新；切会话时从历史最后一条 assistant 消息恢复） */
+    const contextTokens = ref<number | null>(null)
     let abortController: AbortController | null = null
 
     const currentSession = computed(() =>
@@ -121,9 +123,18 @@ export const useAgentStore = defineStore('agent', () => {
         if (isStreaming.value) stop()
         currentSessionId.value = sessionId
         messages.value = []
+        contextTokens.value = null
         try {
             const res = await listAgentMessages(sessionId)
             messages.value = mapHistory(res.data.list)
+            // 恢复上下文水位：最后一条带 prompt_tokens 的 assistant 消息 ≈ 当前上下文占用
+            for (let i = res.data.list.length - 1; i >= 0; i--) {
+                const row = res.data.list[i]
+                if (row && row.role === 'assistant' && row.promptTokens > 0) {
+                    contextTokens.value = row.promptTokens
+                    break
+                }
+            }
         } catch (err) {
             Message.error(getErrorMessage(err, '会话消息加载失败'))
         }
@@ -153,13 +164,14 @@ export const useAgentStore = defineStore('agent', () => {
             sessions.value = []
             currentSessionId.value = null
             messages.value = []
+            contextTokens.value = null
             Message.success(`已清空 ${res.data.removedSessions} 个会话（${res.data.removedMessages} 条消息）`)
         } catch (err) {
             Message.error(getErrorMessage(err, '会话清空失败'))
         }
     }
 
-    async function patchSession(patch: Partial<{ title: string; modelName: string; autoApproveL1: boolean; enableL2: boolean }>) {
+    async function patchSession(patch: Partial<{ title: string; modelName: string; approvalMode: string }>) {
         if (!currentSession.value) return
         try {
             await updateAgentSession(currentSession.value.sessionId, patch)
@@ -288,11 +300,8 @@ export const useAgentStore = defineStore('agent', () => {
                             elapsedMs: Date.now() - current.createTime,
                         }
                     }
-                    break
-                }
-                case 'download_ready': {
-                    current.downloads = current.downloads || []
-                    current.downloads.push({url: ev.url, label: ev.label, size: ev.size, expiresAt: ev.expiresAt})
+                    // 上下文水位：最近一轮 prompt_tokens ≈ 当前上下文占用（usageSoFar 是累计消耗口径）
+                    if (ev.contextTokens && ev.contextTokens > 0) contextTokens.value = ev.contextTokens
                     break
                 }
             }
@@ -327,7 +336,7 @@ export const useAgentStore = defineStore('agent', () => {
             // 清理本轮完全空的气泡（如出错前未收到任何内容；有任一有效载荷的都保留）
             messages.value = messages.value.filter(m =>
                 m.role !== 'assistant' || m.content || m.reasoning || m.toolEvents?.length ||
-                m.confirm || m.downloads?.length || m.error || m.usage)
+                m.confirm || m.error || m.usage)
             isStreaming.value = false
             abortController = null
             // 首次对话后自动起标题（复用工坊标题接口）
@@ -366,7 +375,7 @@ export const useAgentStore = defineStore('agent', () => {
     }
 
     return {
-        sessions, currentSessionId, messages, isStreaming,
+        sessions, currentSessionId, messages, isStreaming, contextTokens,
         currentSession, currentModel,
         loadSessions, createSession, selectSession, removeSession, clearSessions, patchSession,
         send, stop, approve,

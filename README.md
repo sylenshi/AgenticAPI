@@ -1,8 +1,8 @@
 # AgenticAPI
 
-> LLM API 中转站平台 ｜ 当前版本 v0.10.1（2026-11-07）｜ 持续迭代中
+> LLM API 中转站平台 ｜ 当前版本 v0.11.0（2026-11-07）｜ 持续迭代中
 
-基于 Agent 的 API 中转站：对外提供 OpenAI 兼容的大模型接口（密钥鉴权、分组权限、渠道轮询、按 token 计费），配套模型工坊 Playground 与站点维护 Agent（36 个白名单运维工具 + 容器沙箱）。前端 Vue3 + TypeScript，后端 FastAPI + Python（全异步），数据库 MySQL。
+基于 Agent 的 API 中转站：对外提供 OpenAI 兼容的大模型接口（密钥鉴权、分组权限、渠道轮询、按 token 计费），配套模型工坊 Playground 与站点维护 Agent（23 个白名单运维工具 + 容器沙箱）。前端 Vue3 + TypeScript，后端 FastAPI + Python（全异步），数据库 MySQL。
 
 ## 功能特性
 
@@ -14,8 +14,8 @@
 - **兑换码充值**：管理员批量生成（`AGC-` 前缀、四卡监控统计）、用户核销充值（单事务锁码，防并发重复核销）
 - **监控面板**：对话数据（记录表行展开全文、管理员在线调阈值）、调用日志（管理员看全部 / 用户看自己）、数据看板（自由时间范围与粒度的折线图）；统计全走预聚合表，不做原始日志全量求和
 - **模型工坊**：三栏 Playground（`/studio`），SSE 流式对话、思维链折叠、markdown 渲染、多图上传、语音输入、联网搜索（后端 agent 工具循环执行，失败自动降级普通对话）；**调用不计费**，会话 localStorage 按用户隔离
-- **维护 Agent**（管理员，`/dashboard/agent`）：四阶段循环多轮驱动站内任意已启用模型（每轮独立计费），**36 个白名单运维工具**三级风险管控——L0 只读直接执行、L1 低危写弹审批卡（可会话级自动批准）、L2 高危强制审批 + 两阶段 dry-run + 每会话限次；全链路密钥脱敏（`前3****后4`，库里无原文）、结果截断、双轨审计、24 轮 / 200k token 护栏；数据导出一次性 token 下载、内置 6 个运维技能、会话服务端持久化
-- **容器沙箱**（v0.10.0）：`sandbox_exec` 在加固 Linux 容器内执行任意命令（curl / jq / python3，可出公网），覆盖定制工具无法覆盖的长尾运维场景；每条命令强制审批，全站共享单容器 + 懒启动 + 空闲自停，会话间目录隔离，非 root / 只读 rootfs / 资源限额
+- **维护 Agent**（管理员，`/dashboard/agent`）：四阶段循环多轮驱动站内任意已启用模型（每轮独立计费），**23 个白名单运维工具**；写操作按右栏**审批三档位**管控（需要审批 / 部分审批 / 完全权限，L2 删除类两段式 dry-run + 每会话 5 次上限恒生效）；全链路密钥脱敏（`前3****后4`，库里无原文）、结果截断、双轨审计、24 轮 / 200k token 护栏；右栏上下文水位进度条；数据统计 / 清理由 data-governance 技能在沙箱内连库执行；内置 6 个运维技能、会话服务端持久化
+- **容器沙箱**（v0.10.0，v0.11.0 支持连库）：`sandbox_exec` 在加固 Linux 容器内执行任意命令（curl / jq / python3+pymysql，可出公网），覆盖定制工具无法覆盖的长尾运维场景与数据治理脚本；弹卡与否由会话审批档位决定，全站共享单容器 + 懒启动 + 空闲自停，会话间目录隔离，非 root / 只读 rootfs / 资源限额；可选注入站内 MySQL 连接环境变量（`SANDBOX_MYSQL_HOST`，三种接入方式）
 - **上游运维监控**：火山方舟 / 阶跃星辰 / 智谱 TokenPlan 用量监控与凭证管理（需管理员）
 - **鉴权分级**：公开 / 需登录 / 需管理员三级；401 未认证（清登录态弹登录框）、403 已登录无权限（仅提示不登出）
 
@@ -49,7 +49,7 @@ AgenticAPI/
 │   │   ├── core/         # 配置、数据库引擎与会话
 │   │   ├── router/       # API 路由层（relay / studio / maintain_agent / user / keys / redeem / admin / monitor / channels / models / operations / site）
 │   │   ├── schemas/      # Pydantic 请求/响应模型（驼峰别名映射）
-│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、agent/ 维护Agent 循环与 36 工具、sandbox_service 容器沙箱、studio_agent_service 工坊搜索循环、search_service 联网搜索、probe_service 拨测、export_service 导出）
+│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、agent/ 维护Agent 循环与 23 工具、sandbox_service 容器沙箱、studio_agent_service 工坊搜索循环、search_service 联网搜索、probe_service 拨测）
 │   │   ├── crud/         # 数据访问层（原生 SQL）
 │   │   ├── models/       # SQLAlchemy 表定义
 │   │   ├── agent_skills/ # 维护 Agent 内置技能（Markdown SOP，frontmatter 元数据）
@@ -114,7 +114,7 @@ npm run build      # 生产构建
 |---|---|
 | [`docs/后端API接口规范.md`](docs/后端API接口规范.md) | 全部接口请求 / 响应示例与前端对接约定 |
 | [`docs/数据库设计文档.md`](docs/数据库设计文档.md) | 全部表结构与设计说明 |
-| [`docs/维护Agent设计文档.md`](docs/维护Agent设计文档.md) | 维护 Agent 设计与功能：循环与护栏、审批与脱敏机制、36 个工具清单 |
+| [`docs/维护Agent设计文档.md`](docs/维护Agent设计文档.md) | 维护 Agent 设计与功能：循环与护栏、审批三档位与脱敏机制、23 个工具清单 |
 | [`docs/前端UI构建规范.md`](docs/前端UI构建规范.md) | 前端视觉与组件规范 |
 | [`docs/AgenticCLI与MCP封装构想.md`](docs/AgenticCLI与MCP封装构想.md) | 规划中的 CLI / MCP 封装设想 |
 | [`docs/changelog/`](docs/changelog) | 历次全面排查的修复清单与遗留问题记录 |
@@ -129,6 +129,7 @@ npm run build      # 生产构建
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v0.11.0 | 2026-11-07 | 维护 Agent 三项改进：工具精简 36→23（下线 rotate_channel_key / get_redeem_stats / query_users / switch_model，合并上游用量与凭证到期，数据治理 8 工具改由 data-governance 技能 + 沙箱连库脚本承载，导出链路下线）；审批分级收敛为三档位（需要审批 / 部分审批 / 完全权限，L2 每会话 5 次上限恒生效）；右栏新增上下文水位进度条（round_end 新增 contextTokens）；沙箱可选桥接站内 MySQL（SANDBOX_MYSQL_HOST）+ 镜像加装 pymysql；需手动 DDL：`agent_session` 加 `approval_mode` 列 |
 | v0.10.1 | 2026-11-07 | 第 1 次全面排查修复（后端 13 项 / 前端 16 项 / 数据库 12 项）：封禁令牌即时失效、拨测改 POST + 60s 频控、注册分组站点可配、404/405 与 OpenAI 路径报文统一、数据库唯一约束 / 索引补齐、时区统一 +08:00 等；完整清单见 `docs/changelog/` |
 | v0.10.0 | 2026-11-05 | 维护 Agent 能力扩展（27 → 36 工具）：容器沙箱 `sandbox_exec`、渠道 / 模型 CRUD、联网搜索工具、密钥脱敏加固 |
 | v0.9.0 | 2026-10-05 | 维护 Agent 上线：四阶段循环、27 白名单工具三级风险管控、审批卡、6 内置技能、会话服务端持久化 |

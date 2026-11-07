@@ -2,6 +2,9 @@
 
 from pydantic import BaseModel, Field
 
+# 审批档位合法值（与 crud.agent.APPROVAL_MODES 一致）
+APPROVAL_MODE_VALUES = ("confirm_all", "confirm_critical", "full")
+
 
 class AgentSessionCreateSchema(BaseModel):
     """新建会话"""
@@ -10,15 +13,14 @@ class AgentSessionCreateSchema(BaseModel):
 
 
 class AgentSessionUpdateSchema(BaseModel):
-    """更新会话设置（标题 / 模型 / 安全开关）"""
+    """更新会话设置（标题 / 模型 / 审批档位）"""
 
     title: str | None = Field(default=None, max_length=128)
     model_name: str | None = Field(default=None, max_length=128,
                                    alias="modelName", description="切换驱动模型")
-    auto_approve_l1: bool | None = Field(default=None, alias="autoApproveL1",
-                                         description="L1 自动批准开关")
-    enable_l2: bool | None = Field(default=None, alias="enableL2",
-                                   description="L2 高危工具开关")
+    approval_mode: str | None = Field(default=None, alias="approvalMode",
+                                      description="审批档位：confirm_all 需要审批 / "
+                                                  "confirm_critical 部分审批 / full 完全权限")
 
     model_config = {"populate_by_name": True}
 

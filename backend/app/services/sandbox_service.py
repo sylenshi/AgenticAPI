@@ -8,13 +8,18 @@
 - 驱动方式：docker CLI 子进程（asyncio.create_subprocess_exec），不引入 docker SDK，
   本机 Windows（Docker Desktop）与云端 Linux 行为一致；服务器运行用户不在 docker 组
   时可配 SANDBOX_DOCKER_CMD="sudo -n docker"；
-- 加固：独立网桥（与 MySQL 容器隔离）、非 root、--cap-drop ALL、no-new-privileges、
-  只读 rootfs + tmpfs 工作区、内存/CPU/pids 三重限额；不挂载任何宿主路径与 .env，
-  不注入渠道密钥；生产 MySQL/后端仅绑宿主 127.0.0.1，容器网络不可直达；
-- 每条命令仍以审批卡为最终人闸（sandbox_exec 为 L1 + always_confirm 工具）。
+- 加固：独立网桥、非 root、--cap-drop ALL、no-new-privileges、只读 rootfs + tmpfs
+  工作区、内存/CPU/pids 三重限额；不挂载任何宿主路径与 .env，不注入渠道密钥；
+- v0.11.0 MySQL 桥接（可选）：SANDBOX_MYSQL_HOST 配置后向容器注入站内 MySQL 连接
+  环境变量（data-governance 技能在沙箱内跑 pymysql 统计/治理脚本）。"host" 模式经
+  host-gateway 访问宿主机；"container:<名称>" 模式把沙箱接入该容器网络以容器名直连
+  （生产 MySQL 只绑宿主回环也能通）。凭证来自 MysqlSettings 或 SANDBOX_MYSQL_USER/
+  PASSWORD 覆盖值，仅以 docker env 注入（不出现在 .env 挂载与工具返回值中）；
+- 每条命令是否弹审批由会话档位决定（registry 阀门），全程审计。
 
-密钥红线：本服务不接触任何密钥；命令输出经 registry 现有 redact + 8KB 截断管线
-回传模型与前端，嵌入命令中的密钥形态值同样会被掩码。
+密钥红线：本服务不接触渠道密钥；MySQL 连接凭证仅存在于容器环境变量；命令输出经
+registry 现有 redact + 8KB 截断管线回传模型与前端，嵌入命令中的密钥形态值
+（含 mysql://user:pass@ 连接串）同样会被掩码。
 """
 
 import asyncio
@@ -22,7 +27,7 @@ import hashlib
 import shlex
 import time
 
-from app.core.config import BASE_DIR, sandbox_setting
+from app.core.config import BASE_DIR, sandbox_setting, setting as mysql_setting
 
 # Dockerfile 所在目录（docker build 上下文，目录内仅此一个文件）
 SANDBOX_DIR = BASE_DIR / "sandbox"
@@ -126,7 +131,7 @@ async def _ensure_image() -> bool:
 
 
 async def _ensure_network() -> None:
-    """独立网桥网络就绪（与默认网桥上的 MySQL 容器隔离）"""
+    """独立网桥网络就绪（沙箱默认与默认网桥上的 MySQL 容器隔离；桥接见 _ensure_container）"""
     rc, out, _ = await _run_docker(
         ["network", "ls", "--filter", f"name=^{NETWORK_NAME}$", "--format", "{{.Name}}"])
     if rc == 0 and out == NETWORK_NAME:
@@ -134,6 +139,54 @@ async def _ensure_network() -> None:
     rc, _, err = await _run_docker(["network", "create", NETWORK_NAME])
     if rc != 0 and "already exists" not in err:
         raise RuntimeError(f"沙箱网络创建失败：{err[:300]}")
+
+
+def _mysql_bridge() -> dict | None:
+    """解析沙箱-MySQL 桥接配置（v0.11.0）。未配置返回 None（容器保持与数据库隔离）。
+
+    SANDBOX_MYSQL_HOST 三种取值：
+    - "host"：经 host.docker.internal(host-gateway) 访问宿主机端口（本地开发 / Docker Desktop）；
+    - "container:<名称>"：MySQL 以容器运行时，把沙箱接入其所在网络，env 直接写容器名
+      （生产 MySQL 只发布在宿主回环时，跨容器经共享网络直连是唯一可靠路径）；
+    - 其他值：当作主机名/IP 直连（仍注入 host-gateway 解析以便写 host.docker.internal）。
+    连接凭证：SANDBOX_MYSQL_USER/PASSWORD 覆盖值优先，否则复用 MysqlSettings。
+    """
+    raw = (sandbox_setting.SANDBOX_MYSQL_HOST or "").strip()
+    if not raw:
+        return None
+    host = raw
+    if raw.lower().startswith("container:"):
+        host = raw.split(":", 1)[1].strip()
+    if not host:
+        return None
+    return {
+        "host": host,
+        "container_mode": raw.lower().startswith("container:"),
+        "env": {
+            "MYSQL_HOST": host,
+            "MYSQL_PORT": str(mysql_setting.MYSQL_PORT),
+            "MYSQL_USER": sandbox_setting.SANDBOX_MYSQL_USER or mysql_setting.MYSQL_USER,
+            "MYSQL_PASSWORD": sandbox_setting.SANDBOX_MYSQL_PASSWORD or mysql_setting.MYSQL_PASSWORD,
+            "MYSQL_DATABASE": mysql_setting.MYSQL_DATABASE,
+        },
+    }
+
+
+async def _connect_mysql_network(bridge_container: str) -> None:
+    """container:<名称> 模式：把沙箱容器接入目标容器所在的第一个用户自定义网络。
+    失败不阻断沙箱启动——连接问题会在脚本执行时以错误数据回传，由模型向管理员反馈。"""
+    rc, nets, err = await _run_docker(
+        ["inspect", "--format",
+         "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}", bridge_container])
+    if rc != 0 or not nets.strip():
+        print(f"[sandbox] 检测 MySQL 容器 {bridge_container} 网络失败：{(err or nets)[:200]}")
+        return
+    for net in nets.split():
+        rc2, _, err2 = await _run_docker(["network", "connect", net, CONTAINER_NAME])
+        if rc2 == 0 or "already exists" in (err2 or "").lower():
+            print(f"[sandbox] 沙箱已接入网络 {net}（MySQL 容器 {bridge_container}）")
+            return
+    print(f"[sandbox] 沙箱接入 MySQL 网络失败：{(err2 or '')[:200]}")
 
 
 async def _container_state() -> str:
@@ -145,7 +198,8 @@ async def _container_state() -> str:
 
 async def _ensure_container(rebuilt: bool) -> None:
     """容器三态复用：运行中直接用 / 已存在则 start / 不存在则 run（加固参数）。
-    镜像重建后旧容器作废，先删再起。"""
+    镜像重建后旧容器作废，先删再起。配置了 MySQL 桥接时追加 host-gateway 解析、
+    连接环境变量注入；container:<名称> 模式再接入 MySQL 容器网络。"""
     global _running_flag
     state = await _container_state()
 
@@ -156,22 +210,29 @@ async def _ensure_container(rebuilt: bool) -> None:
     if state:  # 存在但未运行，或镜像已重建
         await _run_docker(["rm", "-f", CONTAINER_NAME], timeout=STOP_TIMEOUT)
 
-    rc, out, err = await _run_docker(
-        ["run", "-d",
-         "--name", CONTAINER_NAME,
-         "--network", NETWORK_NAME,
-         "--restart", "no",
-         "--memory", "512m", "--cpus", "1", "--pids-limit", "256",
-         "--cap-drop", "ALL",
-         "--security-opt", "no-new-privileges",
-         "--read-only",
-         "--tmpfs", "/tmp:rw,size=64m",
-         "--tmpfs", "/workspace:rw,size=256m,uid=1000,gid=1000",
-         "-u", "1000:1000",
-         sandbox_setting.SANDBOX_IMAGE],
-        timeout=DOCKER_TIMEOUT)
+    bridge = _mysql_bridge()
+    run_args = ["run", "-d",
+                "--name", CONTAINER_NAME,
+                "--network", NETWORK_NAME,
+                "--restart", "no",
+                "--memory", "512m", "--cpus", "1", "--pids-limit", "256",
+                "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges",
+                "--read-only",
+                "--tmpfs", "/tmp:rw,size=64m",
+                "--tmpfs", "/workspace:rw,size=256m,uid=1000,gid=1000",
+                "-u", "1000:1000"]
+    if bridge:
+        run_args += ["--add-host", "host.docker.internal:host-gateway"]
+        for key, value in bridge["env"].items():
+            run_args += ["-e", f"{key}={value}"]
+    run_args.append(sandbox_setting.SANDBOX_IMAGE)
+
+    rc, out, err = await _run_docker(run_args, timeout=DOCKER_TIMEOUT)
     if rc != 0:
         raise RuntimeError(f"沙箱容器启动失败：{(err or out)[:300]}")
+    if bridge and bridge["container_mode"]:
+        await _connect_mysql_network(bridge["host"])
     _running_flag = True
 
 
