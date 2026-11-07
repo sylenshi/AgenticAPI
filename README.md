@@ -1,6 +1,6 @@
 # AgenticAPI
 
-> LLM API 中转站平台 ｜ 当前版本 v0.14.0（2026-11-07）｜ 持续迭代中
+> LLM API 中转站平台 ｜ 当前版本 v0.14.1（2026-11-07）｜ 持续迭代中
 
 基于 Agent 的 API 中转站：对外提供 OpenAI 兼容的大模型接口（密钥鉴权、分组权限、渠道轮询、按 token 计费），配套模型工坊 Playground 与站点维护 Agent（25 个白名单运维工具 + 容器沙箱）。前端 Vue3 + TypeScript，后端 FastAPI + Python（全异步），数据库 MySQL。
 
@@ -128,6 +128,7 @@ npm run build      # 生产构建
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v0.14.1 | 2026-11-07 | 维护 Agent 首轮实战复盘修复（会话导出暴露）：redact 两处误伤——`max_tokens` 等业务统计字段键名豁免（原被 "token" 子串误掩成 `****`）、已掩码形态的值（apiKeyHint 尾 4 位提示）不再二次处理；`web_search` 自截断（Agent 侧 6 条 × 220 字摘要，修字符/字节口径不一致导致的必然整体折叠，三连空转），工坊默认配额不变；`list_upstream_models` 404 提示去除前导分隔符、summary 不再重复 error 全文；沙箱描述补"境内出口仅国内站点可达（境外站点不通，联网核实用 web_search）"；折叠/截断提示文案去除已下线的"导出类工具"说法；无需 DDL |
 | v0.14.0 | 2026-11-07 | 维护 Agent 安全用钥通道：需要密钥的上游操作改为后端代持密钥执行（Agent 只引用渠道名，密钥不进对话上下文/沙箱）——新增 `list_upstream_models`（代持密钥拉上游 /models 清单做模型发现，404 提示改走试拨）、`test_channel` 放宽为可试拨声明列表外候选模型（`notInDeclaredList` 标注）、恢复 `rotate_channel_key`（L2 审批卡只显尾 4 位，凭证到期可闭环）；工具 23→25（L0 15 / L1 3 / L2 7）；修正系统提示词与沙箱描述"拉上游模型清单用沙箱"的自相矛盾指引；新增会话记录一键导出（`GET /sessions/{id}/export` Markdown：正文/工具调用/结果/审批轨迹，右栏侧边栏按钮自动下载）；无需 DDL |
 | v0.13.0 | 2026-11-07 | 维护 Agent 任务与请求解耦：`POST /maintain-agent/chat` 改为提交服务端托管的后台任务（立即返回，同会话并发 409），新增 `GET /sessions/{id}/stream` 订阅事件流（回放缓冲 + 实时跟随 + 15s 心跳防代理超时）与 `POST /sessions/{id}/stop` 停止端点，会话列表带 `running` 标记；页面进出 / 刷新 / 断网不再中断任务，重新进入会话自动回放+跟随续看进度；前端移除"切换会话自动停止"逻辑，停止按钮改为取消服务端任务；无需 DDL |
 | v0.12.0 | 2026-11-07 | 维护 Agent 护栏与工具体系重构：护栏以单任务成本上限（默认 ¥2，设置页可调）替代累计 token 预算，轮数 24→40 且末段软提示软着陆，叫停发 task_paused 支持前端一键续跑；修复压缩兜底失效与续轮零容错（统一 `_open_round`：复用渠道 + 重试 + 跨渠道 failover）；工具体系删除 always_confirm 标记，原强审 5 工具按行为等价并入等级（create_channel / create_model / delete_skill / sandbox_exec → L2 关键写，save_skill → L1），执行上限改为按工具声明的会话配额（删除类 10 次、沙箱 30 次），阀门收敛为档位 × 等级一张查表；`agent_message` 加 `tool_name` 列（配额按工具名计数）；前端右栏下线风险等级图例、审批卡与帮助文案去内部分级话术，设置页新增单任务成本上限；需手动 DDL：`agent_message` 加 `tool_name` 列 |
