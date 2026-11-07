@@ -7,7 +7,6 @@
         <header class="chat-header">
           <div class="chat-title">
             <h3>{{ agentStore.currentSession.title }}</h3>
-            <span class="chat-model-tag">{{ agentStore.currentModel }}</span>
           </div>
           <div class="chat-header-actions">
             <a-tooltip content="导出当前会话记录（Markdown，含工具调用与审批轨迹），任务执行中也可导出">
@@ -450,16 +449,6 @@ async function exportSession() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chat-model-tag {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-primary);
-  background: var(--color-primary-lighter);
-  padding: 1px 8px;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
 }
 
 .chat-empty {
