@@ -9,7 +9,9 @@ import {
     listAgentMessages,
     listAgentSessions,
     resolveApproval,
-    streamAgentChat,
+    startAgentChat,
+    stopAgentTask,
+    streamAgentEvents,
     updateAgentSession,
 } from '@/api/agent'
 import {studioTitle} from '@/api/studio'
@@ -93,6 +95,8 @@ export const useAgentStore = defineStore('agent', () => {
     /** 护栏叫停原因（task_paused 事件置位；"继续任务"按钮入口，发送后清空） */
     const pausedReason = ref<'round_limit' | 'cost_limit' | null>(null)
     let abortController: AbortController | null = null
+    /** 当前订阅事件流的会话（跟随任务；切换会话只断订阅，服务端任务继续跑） */
+    let subscribedSessionId: number | null = null
 
     const currentSession = computed(() =>
         sessions.value.find(s => s.sessionId === currentSessionId.value) || null)
@@ -122,7 +126,13 @@ export const useAgentStore = defineStore('agent', () => {
     }
 
     async function selectSession(sessionId: number) {
-        if (isStreaming.value) stop()
+        // 离开旧会话只断开事件订阅，服务端任务继续跑（v0.13.0 任务解耦）
+        if (abortController) {
+            abortController.abort()
+            abortController = null
+        }
+        subscribedSessionId = null
+        isStreaming.value = false
         currentSessionId.value = sessionId
         messages.value = []
         contextTokens.value = null
@@ -138,6 +148,9 @@ export const useAgentStore = defineStore('agent', () => {
                     break
                 }
             }
+            // 该会话有任务在服务端执行：订阅事件流，回放+跟随续看进度
+            const session = sessions.value.find(s => s.sessionId === sessionId)
+            if (session?.running) await followTask(sessionId)
         } catch (err) {
             Message.error(getErrorMessage(err, '会话消息加载失败'))
         }
@@ -185,7 +198,7 @@ export const useAgentStore = defineStore('agent', () => {
         }
     }
 
-    /** ═══════════ 发送与流式接收 ═══════════ */
+    /** ═══════════ 提交任务与事件流跟随（v0.13.0 任务解耦）═══════════ */
 
     async function send(content: string) {
         if (!currentSession.value || isStreaming.value || !content.trim()) return
@@ -197,6 +210,46 @@ export const useAgentStore = defineStore('agent', () => {
             id: genStudioId(), role: 'user', content: content.trim(),
             createTime: Date.now(),
         })
+
+        // 提交后台任务（服务端托管执行，页面随时可以离开）
+        try {
+            await startAgentChat(sessionId, content.trim())
+        } catch (err) {
+            Message.error(getErrorMessage(err, '任务启动失败'))
+            messages.value.pop()  // 回滚乐观插入的用户气泡
+            return
+        }
+        await followTask(sessionId)
+
+        // 首次对话后自动起标题（复用工坊标题接口）
+        if (sessionTitle === '新会话' && currentSession.value) {
+            try {
+                const res = await studioTitle(content.trim())
+                const title = res.data?.title
+                if (title && title !== '新对话') await patchSession({title})
+            } catch {
+                // 标题失败不打扰
+            }
+        }
+    }
+
+    /**
+     * 订阅会话任务事件流并渲染：服务端先回放任务缓冲（replay_start.baseMessages 供
+     * 裁剪已从 DB 加载的任务期消息，避免重复渲染），再实时跟随到任务结束。
+     * 切换会话/离开页面只 abort 订阅，不影响服务端任务；重新进入经 selectSession 续看。
+     */
+    async function followTask(sessionId: number) {
+        if (subscribedSessionId === sessionId && isStreaming.value) return  // 已在跟随
+        if (abortController) {  // 切换订阅目标：断开旧流
+            abortController.abort()
+            abortController = null
+        }
+        subscribedSessionId = sessionId
+        isStreaming.value = true
+        const controller = new AbortController()
+        abortController = controller
+        // 订阅期间有效：被停止或切换了会话即失效
+        const alive = () => isStreaming.value && subscribedSessionId === sessionId
 
         // 一轮回复按「文本段 / 工具段」拆成多个 assistant 气泡，保持时序：
         // 文本与思维链写进当前气泡；工具调用开新气泡承接，工具结束后的正文再开新气泡
@@ -212,10 +265,6 @@ export const useAgentStore = defineStore('agent', () => {
         }
 
         let current = openBubble()
-        isStreaming.value = true
-        abortController = new AbortController()
-        // 流式期间有效：被停止或切换了会话即失效
-        const alive = () => isStreaming.value && currentSession.value?.sessionId === sessionId
 
         /** 文本/思维链落笔前的分段：当前气泡已承载过工具时新开一段 */
         function ensureTextBubble(): studioMessage {
@@ -232,6 +281,17 @@ export const useAgentStore = defineStore('agent', () => {
         function handleAgentEvent(ev: agentStreamEvent) {
             if (!alive()) return
             switch (ev.type) {
+                case 'replay_start': {
+                    // baseMessages = 任务启动前已持久化的消息数；裁掉已从 DB 加载的任务期
+                    // 消息（随后由回放事件重放），-1 表示保留全部已加载历史（无任务跟随）
+                    if (ev.baseMessages >= 0) {
+                        messages.value = messages.value.slice(0, ev.baseMessages)
+                    }
+                    break
+                }
+                case 'task_inactive': {
+                    break  // 无任务可跟随：流即将 [DONE] 收尾，无需处理
+                }
                 case 'tool_start': {
                     const bubble = ensureToolBubble()
                     bubble.toolEvents = bubble.toolEvents || []
@@ -317,7 +377,7 @@ export const useAgentStore = defineStore('agent', () => {
         }
 
         try {
-            await streamAgentChat(sessionId, content.trim(), {
+            await streamAgentEvents(sessionId, {
                 onChunk: (text) => {
                     if (!alive()) return
                     const bubble = ensureTextBubble()
@@ -340,31 +400,35 @@ export const useAgentStore = defineStore('agent', () => {
                 onError: (msg) => {
                     if (alive()) current.error = msg
                 },
-            }, abortController.signal)
+            }, controller.signal)
         } finally {
-            // 清理本轮完全空的气泡（如出错前未收到任何内容；有任一有效载荷的都保留）
-            messages.value = messages.value.filter(m =>
-                m.role !== 'assistant' || m.content || m.reasoning || m.toolEvents?.length ||
-                m.confirm || m.error || m.usage)
-            isStreaming.value = false
-            abortController = null
-            // 首次对话后自动起标题（复用工坊标题接口）
-            if (sessionTitle === '新会话' && currentSession.value) {
-                try {
-                    const res = await studioTitle(content.trim())
-                    const title = res.data?.title
-                    if (title && title !== '新对话') await patchSession({title})
-                } catch {
-                    // 标题失败不打扰
-                }
+            // 仅当本订阅仍是当前订阅时才清理状态（切换会话后旧流的收尾不得覆盖新订阅）
+            if (abortController === controller) {
+                // 清理本轮完全空的气泡（如出错前未收到任何内容；有任一有效载荷的都保留）
+                messages.value = messages.value.filter(m =>
+                    m.role !== 'assistant' || m.content || m.reasoning || m.toolEvents?.length ||
+                    m.confirm || m.error || m.usage)
+                isStreaming.value = false
+                abortController = null
+                subscribedSessionId = null
             }
         }
     }
 
-    function stop() {
+    /** 停止：取消服务端任务 + 断开订阅（任务取消后悬挂 tool_calls 由后端下次加载时修复） */
+    async function stop() {
+        const sessionId = currentSessionId.value
         abortController?.abort()
         abortController = null
         isStreaming.value = false
+        subscribedSessionId = null
+        if (sessionId != null) {
+            try {
+                await stopAgentTask(sessionId)
+            } catch {
+                // 任务可能已自然结束，忽略
+            }
+        }
     }
 
     /** ═══════════ 审批 ═══════════ */

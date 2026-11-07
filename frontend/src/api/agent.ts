@@ -1,7 +1,9 @@
 // 站点维护 Agent 接口封装
 //
-// 对话接口与工坊同款：SSE 流式 + OpenAI 风格报文（站内扩展事件挂 agenticapi_agent
-// 字段），不走 axios 封装，用 fetch 逐行解析；会话/审批等管理接口是普通统一格式。
+// v0.13.0 任务解耦：对话是"提交任务（POST /chat，立即返回 JSON）+ 订阅事件流
+// （GET /sessions/{id}/stream，SSE：回放缓冲 + 实时跟随 + 心跳）"——任务在服务端
+// 托管执行，页面进出/刷新均不影响任务，重新进入自动续看。事件格式与工坊同款
+// （OpenAI 风格增量，站内扩展挂 agenticapi_agent 字段），fetch 逐行解析不走 axios。
 import request, {API_BASE} from './request'
 import {useUserStore} from '@/stores/user'
 import type {agentServerMessage, agentSession, agentStreamEvent} from '@/types'
@@ -12,7 +14,7 @@ export interface agentStreamCallbacks {
     onChunk?: (text: string) => void
     /** 思维链增量 */
     onReasoning?: (text: string) => void
-    /** 维护 Agent 站内扩展事件（工具/审批/模型切换/下载…） */
+    /** 维护 Agent 站内扩展事件（工具/审批/回放/轮次…） */
     onAgentEvent?: (ev: agentStreamEvent) => void
     /** 最后合成的 token 用量 */
     onUsage?: (usage: { promptTokens: number; completionTokens: number }) => void
@@ -20,13 +22,23 @@ export interface agentStreamCallbacks {
     onError?: (message: string) => void
 }
 
+/** 提交维护任务：服务端后台执行，立即返回（同会话已有任务在跑时后端 409） */
+export function startAgentChat(sessionId: number, content: string) {
+    return request.post<{ sessionId: number }>('/maintain-agent/chat', {sessionId, content})
+}
+
+/** 停止执行中的任务 */
+export function stopAgentTask(sessionId: number) {
+    return request.post<{ stopped: boolean }>(`/maintain-agent/sessions/${sessionId}/stop`)
+}
+
 /**
- * 维护 Agent 流式对话：POST /maintain-agent/chat，解析 SSE 增量并回调。
- * 解析模式复刻工坊 streamStudioChat（跨 chunk 行缓冲 + agenticapi_* 扩展分发）。
+ * 订阅会话任务事件流：GET /maintain-agent/sessions/{id}/stream。
+ * 服务端先回放任务缓冲（replay_start.baseMessages 供前端裁剪已加载的历史）再实时跟随，
+ * 空闲期发 ": ping" 心跳注释行（解析时跳过）。页面离开时 abort 即可，不影响服务端任务。
  */
-export async function streamAgentChat(
+export async function streamAgentEvents(
     sessionId: number,
-    content: string,
     callbacks: agentStreamCallbacks,
     signal?: AbortSignal,
 ): Promise<void> {
@@ -34,13 +46,9 @@ export async function streamAgentChat(
 
     let resp: Response
     try {
-        resp = await fetch(`${API_BASE}/maintain-agent/chat`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(userStore.token ? {Authorization: `Bearer ${userStore.token}`} : {}),
-            },
-            body: JSON.stringify({sessionId, content}),
+        resp = await fetch(`${API_BASE}/maintain-agent/sessions/${sessionId}/stream`, {
+            method: 'GET',
+            headers: userStore.token ? {Authorization: `Bearer ${userStore.token}`} : {},
             signal,
         })
     } catch (err) {
@@ -59,14 +67,7 @@ export async function streamAgentChat(
             callbacks.onError?.('请先登录')
             return
         }
-        let message = `请求失败（${resp.status}）`
-        try {
-            const data = await resp.json()
-            message = data?.error?.message || message
-        } catch {
-            // 非 JSON 响应体保留默认提示
-        }
-        callbacks.onError?.(message)
+        callbacks.onError?.(`订阅失败（${resp.status}）`)
         return
     }
 
@@ -75,7 +76,7 @@ export async function streamAgentChat(
     let buf = ''
 
     const handleLine = (line: string) => {
-        if (!line.startsWith('data:')) return
+        if (!line.startsWith('data:')) return  // 跳过心跳注释行与空行
         const data = line.slice(5).trim()
         if (!data || data === '[DONE]') return
         let obj: any
@@ -90,7 +91,7 @@ export async function streamAgentChat(
             callbacks.onError?.(obj.error.message)
             return
         }
-        // 维护 Agent 扩展事件（工具/审批/模型切换/轮次/下载）
+        // 维护 Agent 扩展事件（工具/审批/回放/轮次/暂停）
         if (obj.agenticapi_agent) {
             const ev = obj.agenticapi_agent
             if (ev && typeof ev === 'object' && typeof ev.type === 'string') {

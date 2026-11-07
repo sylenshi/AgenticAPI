@@ -1,10 +1,13 @@
-"""维护 Agent 主循环：四阶段（queue → prepare → execute → settle）+ SSE 事件总线
+"""维护 Agent 主循环：服务端托管的后台任务 + 会话事件总线（v0.13.0 任务解耦）
 
 形态总览（详见根目录设计文档）：
 - 大脑走本站中转链路（source="agent"：计费照常扣管理员余额、写 logs/统计，
   唯一差异是不写 chat_record——维护对话独立存储在 agent_message）；
 - 手是白名单工具（registry），关键写操作过人审阀门（approvals）；
-- SSE 复刻工坊模式：正文走 OpenAI 风格增量，站内扩展统一挂 agenticapi_agent 字段。
+- 任务生命周期与 HTTP 请求解耦：POST /chat 只提交任务（服务端 asyncio Task 托管），
+  页面经 GET /stream 订阅事件（回放缓冲 + 实时跟随 + 心跳保活）——页面进出、
+  刷新、断网均不影响任务执行，重新进入自动续上；
+- 事件格式复刻工坊模式：正文走 OpenAI 风格增量，站内扩展统一挂 agenticapi_agent 字段。
 
 护栏（均按"单次任务"计，一条用户消息触发的完整循环）：
 MAX_TOOL_ROUNDS 工具轮上限（末段软提示软着陆）/ AGENT_TASK_COST_LIMIT 任务成本上限
@@ -16,13 +19,14 @@ finish_reason=length 截断防御（残缺 tool_calls 一律不执行）。
 import asyncio
 import json
 import time
+from collections import deque
 from collections.abc import AsyncIterator
 from decimal import Decimal
 
 import httpx
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import asyncSessionLocal
 from app.crud import agent as agent_crud
 from app.crud import channel as channel_crud
 from app.crud import system_config as config_crud
@@ -42,9 +46,109 @@ DEHYDRATE_KEEP_RECENT = 12      # 脱水窗口：最近 N 条消息不折叠
 DEHYDRATE_MIN_CHARS = 600       # 短于该长度的 tool 结果不值得折叠
 COMPACT_TRIGGER_RATIO = 0.7     # 估算 token 超过 context_length×70% 触发压缩
 COMPACT_TARGET_RATIO = 0.6      # 压缩目标：折叠至 context_length×60% 以下
+STREAM_HEARTBEAT_SECONDS = 15   # 订阅流空闲心跳间隔（防 nginx proxy_read_timeout 掐断）
 
-# 正在执行任务的会话（防同会话并发跑两个循环）
-_RUNNING: set[int] = set()
+# ── 任务托管：会话 → 后台任务 / 事件总线（防同会话并发跑两个循环）──
+_TASKS: dict[int, asyncio.Task] = {}
+_BUS: dict[int, "SessionEventBus"] = {}
+
+
+class SessionEventBus:
+    """单会话事件总线：任务侧发布，订阅流（GET /stream）回放 + 实时跟随。
+
+    - publish 同时写入回放缓冲与各订阅者队列（同一对象，订阅侧可按对象身份去重）；
+    - 任务结束 finish() 向所有订阅者投递 None 哨兵并清空缓冲（结束后历史走 DB 加载）；
+    - 缓冲上限 deque(maxlen)：超长任务（如沙箱大量输出）只保最近事件，回放可能缺失最旧片段。
+    """
+
+    def __init__(self, base_messages: int):
+        self.base_messages = base_messages            # 任务启动前已持久化的消息数（前端裁剪历史用）
+        self.buffer: deque[bytes] = deque(maxlen=2000)
+        self._queues: list[asyncio.Queue] = []
+        self.finished = False
+
+    def publish(self, event: bytes) -> None:
+        if self.finished:
+            return
+        self.buffer.append(event)
+        for queue in self._queues:
+            queue.put_nowait(event)
+
+    def subscribe(self) -> asyncio.Queue:
+        queue: asyncio.Queue = asyncio.Queue()
+        self._queues.append(queue)
+        return queue
+
+    def unsubscribe(self, queue: asyncio.Queue) -> None:
+        if queue in self._queues:
+            self._queues.remove(queue)
+
+    def finish(self) -> None:
+        if self.finished:
+            return
+        self.finished = True
+        for queue in self._queues:
+            queue.put_nowait(None)
+        self.buffer.clear()
+
+
+def get_bus(session_id: int) -> SessionEventBus | None:
+    """取会话事件总线（订阅端点用；None = 无任务可跟随）"""
+    return _BUS.get(session_id)
+
+
+def is_running(session_id: int) -> bool:
+    """会话是否有执行中的任务（sessions 列表 running 标记用）"""
+    task = _TASKS.get(session_id)
+    return bool(task and not task.done())
+
+
+def stop_task(session_id: int) -> bool:
+    """取消会话执行中的任务（停止端点用）。返回是否确实取消了任务。"""
+    task = _TASKS.get(session_id)
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
+
+
+def start_task(session_id: int, user_id: int, content: str) -> None:
+    """提交后台任务（调用方已完成会话归属校验）。同会话已有任务在跑时抛 RelayError(409)。"""
+    existing = _TASKS.get(session_id)
+    if existing and not existing.done():
+        raise RelayError(409, "当前会话正在执行任务，请等待完成、点停止或切换页面后再发送")
+    _TASKS[session_id] = asyncio.create_task(_task_main(session_id, user_id, content))
+
+
+async def stream_events(session_id: int, bus: SessionEventBus | None) -> AsyncIterator[bytes]:
+    """订阅端点的 SSE 生成器：回放缓冲 → 实时跟随 → [DONE]；空闲期发心跳注释防代理超时。"""
+    if bus is None or bus.finished:
+        # 无任务可跟随：baseMessages=-1 表示"保留前端已加载的全部历史"，前端直接结束即可
+        yield _agent_event({"type": "replay_start", "baseMessages": -1})
+        yield _agent_event({"type": "task_inactive"})
+        yield b"data: [DONE]\n\n"
+        return
+    queue = bus.subscribe()
+    snapshot = list(bus.buffer)
+    seen = {id(evt) for evt in snapshot}  # publish 把同一对象写入缓冲与队列，按身份去重
+    try:
+        yield _agent_event({"type": "replay_start", "baseMessages": bus.base_messages})
+        for evt in snapshot:
+            yield evt
+        while True:
+            try:
+                evt = await asyncio.wait_for(queue.get(), timeout=STREAM_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                yield b": ping\n\n"  # SSE 注释行，仅保活连接
+                continue
+            if evt is None:
+                break
+            if id(evt) in seen:
+                continue
+            yield evt
+    finally:
+        bus.unsubscribe(queue)
+    yield b"data: [DONE]\n\n"
 
 
 def _agent_event(data: dict) -> bytes:
@@ -230,56 +334,63 @@ async def repair_dangling_tool_calls(db: AsyncSession, session_id: int) -> int:
     return repaired
 
 
-def release_session(session_id: int) -> None:
-    """释放会话执行锁（路由层异常分支用——StreamingResponse 构造失败等场景）"""
-    _RUNNING.discard(session_id)
+async def _task_main(session_id: int, user_id: int, content: str) -> None:
+    """后台任务入口：自持 DB 会话（任务生命周期独立于请求），装配上下文后进入主循环。
 
-
-async def run_chat(db: AsyncSession, session, user: UserTabel, content: str) -> StreamingResponse:
+    任何退出路径（正常结束 / 异常 / 取消）都保证：事件总线收尾（投递结束哨兵）、
+    未决审批置拒绝——任务不再依赖任何客户端连接存活。
     """
-    维护 Agent 对话入口（SSE）。session 为 AgentSessionTable 行。
-
-    - 同会话防并发：执行中的会话再发消息抛 RelayError(409)（OpenAI 风格报文）；
-    - 启动时修复中断历史（悬挂 tool_calls 补占位结果）。
-    """
-    if session.id in _RUNNING:
-        raise RelayError(409, "当前会话正在执行任务，请等待完成或点停止后再发送")
-    _RUNNING.add(session.id)
+    bus: SessionEventBus | None = None
     try:
-        await repair_dangling_tool_calls(db, session.id)
-        return StreamingResponse(_run(db, session, user, content), media_type="text/event-stream")
-    except Exception:
-        _RUNNING.discard(session.id)
+        async with asyncSessionLocal() as db:
+            session = await agent_crud.get_session(db, session_id)
+            user = await db.get(UserTabel, user_id)
+            if session is None or user is None:
+                return  # 会话/用户在任务排队期间被删除，静默退出
+
+            # ── ① queue：修复中断历史 + 落库用户消息 + 装配历史 ──
+            await repair_dangling_tool_calls(db, session_id)
+            await agent_crud.insert_message(db, session_id=session_id, role="user", content=content)
+            history: list[dict] = await agent_crud.list_messages(db, session_id)
+
+            session_dict = {
+                "id": session_id,
+                "model_name": session.model_name,
+                "approval_mode": agent_crud.resolve_approval_mode(session),
+            }
+            # 任务启动前已持久化的消息数（含本条用户消息）：订阅流回放时前端据此裁剪历史避免重复渲染
+            bus = SessionEventBus(base_messages=len(history))
+            _BUS[session_id] = bus
+
+            async def emit(event: dict) -> None:
+                bus.publish(_agent_event(event))
+
+            ctx = ToolContext(db=db, user=user, session=session_dict, emit=emit)
+            counts = await agent_crud.count_tool_executions(db, session_id)
+            legacy_l2 = counts.pop("_legacy_l2", 0)
+            if legacy_l2:
+                # tool_name 列上线前的旧 L2 记录只有 delete_channel / delete_model 两个来源，
+                # 无法区分归属，保守起见同时计入两者的配额
+                for name in ("delete_channel", "delete_model"):
+                    counts[name] = counts.get(name, 0) + legacy_l2
+            ctx.used_counts = counts
+
+            try:
+                await _execute(db, session_dict, user, content, history, ctx, bus)
+            except Exception as exc:
+                bus.publish(_error_event(f"任务异常终止：{exc.__class__.__name__}: {exc}"))
+            finally:
+                bus.finish()
+                approval_manager.fail_all_in_session(session_id)
+    except asyncio.CancelledError:
+        # 停止端点 / 服务停机取消：内层 finally 已完成总线收尾与审批清理，这里只放行取消
         raise
 
 
-async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> AsyncIterator[bytes]:
-    """主循环生成器：四阶段循环 + 事件总线（列表队列解耦 emit 与 yield）"""
-    session_id = session.id
-    session_dict = {
-        "id": session_id,
-        "model_name": session.model_name,
-        "approval_mode": agent_crud.resolve_approval_mode(session),
-    }
-
-    # ── ① queue：落库用户消息，装配历史 ──
-    await agent_crud.insert_message(db, session_id=session_id, role="user", content=content)
-    history: list[dict] = await agent_crud.list_messages(db, session_id)
-
-    event_queue: list[dict] = []
-
-    async def emit(event: dict) -> None:
-        event_queue.append(event)
-
-    ctx = ToolContext(db=db, user=user, session=session_dict, emit=emit)
-    counts = await agent_crud.count_tool_executions(db, session_id)
-    legacy_l2 = counts.pop("_legacy_l2", 0)
-    if legacy_l2:
-        # tool_name 列上线前的旧 L2 记录只有 delete_channel / delete_model 两个来源，
-        # 无法区分归属，保守起见同时计入两者的配额
-        for name in ("delete_channel", "delete_model"):
-            counts[name] = counts.get(name, 0) + legacy_l2
-    ctx.used_counts = counts
+async def _execute(db: AsyncSession, session_dict: dict, user: UserTabel, content: str,
+                   history: list[dict], ctx: ToolContext, bus: SessionEventBus) -> None:
+    """主循环（四阶段迭代 + 事件经总线发布）。任务级异常由 _task_main 统一收尾。"""
+    session_id = session_dict["id"]
 
     # 任务成本护栏（单次任务口径；配置链 system_config → 默认值，管理员设置页可调）
     cost_limit = await config_crud.get_agent_task_cost_limit(db)
@@ -323,7 +434,7 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
                              "messages": [{"role": "user", "content": "ping"}]},
                         user, source="agent")
                 except RelayError as exc:
-                    yield _error_event(f"模型解析失败：{exc.message}")
+                    bus.publish(_error_event(f"模型解析失败：{exc.message}"))
                     break
                 channel = None  # 新纪元重新选渠道
 
@@ -359,7 +470,7 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
                 db, epoch_model, epoch_channels, body,
                 prefer_name=channel["channel_name"] if channel else None)
             if channel is None:
-                yield _error_event(f"所有上游渠道调用失败：{err}")
+                bus.publish(_error_event(f"所有上游渠道调用失败：{err}"))
                 break
             if include_tools and "tools" not in body and not tools_degraded:
                 # 降级发生：上游不支持 tools，本任务后续轮次不再注入并提示模型
@@ -368,13 +479,13 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
                                 "（系统提示：当前驱动模型不支持函数工具调用，本轮起仅可纯对话；"
                                 "建议让管理员在页面顶部选择器切换到支持工具调用的模型后继续任务）"})
 
-            # ── ③ execute：消费一轮上游 SSE，转发文本增量 ──
+            # ── ③ execute：消费一轮上游 SSE，文本增量经总线发布 ──
             round_start = time.time()
             st = {"tool_calls": {}, "encrypted": "", "finish_reason": "",
                   "upstream_error": None, "round_usage": None}
             parts = {"reasoning": "", "output": ""}
             async for out in _forward_round(resp, client, st, parts, needs_mapping, model_name):
-                yield out
+                bus.publish(out)
 
             round_usage = st["round_usage"] or {"prompt": 0, "completion": 0, "cached": 0}
             usage_total["prompt"] += round_usage["prompt"]
@@ -429,22 +540,22 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
                             "tool_calls": assistant_tool_calls or None,
                             "_encrypted": st["encrypted"] or None})
 
-            yield _agent_event({"type": "round_end", "round": round_no,
-                                "usageSoFar": {"promptTokens": usage_total["prompt"],
-                                               "completionTokens": usage_total["completion"]},
-                                # 上下文水位口径：最近一轮官方 prompt_tokens ≈ 当前上下文真实占用
-                                #（usageSoFar 是累计消耗，含已被脱水的历史，不能当水位用）
-                                "contextTokens": last_prompt_tokens})
+            bus.publish(_agent_event({"type": "round_end", "round": round_no,
+                                      "usageSoFar": {"promptTokens": usage_total["prompt"],
+                                                     "completionTokens": usage_total["completion"]},
+                                      # 上下文水位口径：最近一轮官方 prompt_tokens ≈ 当前上下文真实占用
+                                      #（usageSoFar 是累计消耗，含已被脱水的历史，不能当水位用）
+                                      "contextTokens": last_prompt_tokens}))
 
             if not calls:
                 break  # 纯文本作答 → 结束
 
-            # ── 工具执行（事件队列随执行实时排空，保证审批卡片先于等待到达前端）──
+            # ── 工具执行（事件经总线实时发布，审批卡片即时到达订阅端）──
             for n, c in enumerate(calls):
                 call_id = assistant_tool_calls[n]["id"]
                 tool_name = c["name"] or ""
-                yield _agent_event({"type": "tool_start", "tool": tool_name,
-                                    "digest": _redact_arguments(c["arguments"] or "")[:120]})
+                bus.publish(_agent_event({"type": "tool_start", "tool": tool_name,
+                                          "digest": _redact_arguments(c["arguments"] or "")[:120]}))
 
                 if truncated:
                     # 截断防御：length 截断的残缺调用一律判失败不执行
@@ -456,17 +567,10 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
                             ensure_ascii=False),
                         summary="已拒绝（输出截断防御）", risk="L0", approval_status="none")
                 else:
-                    task = asyncio.create_task(execute_tool(ctx, tool_name, c["arguments"] or "{}"))
-                    while True:
-                        await asyncio.wait({task}, timeout=0.1)
-                        while event_queue:
-                            yield _agent_event(event_queue.pop(0))
-                        if task.done():
-                            break
-                    execution = task.result()
+                    execution = await execute_tool(ctx, tool_name, c["arguments"] or "{}")
 
-                yield _agent_event({"type": "tool_end", "tool": tool_name, "ok": execution.ok,
-                                    "summary": (execution.summary or "")[:200]})
+                bus.publish(_agent_event({"type": "tool_end", "tool": tool_name, "ok": execution.ok,
+                                          "summary": (execution.summary or "")[:200]}))
 
                 await agent_crud.insert_message(
                     db, session_id=session_id, role="tool", content=execution.content,
@@ -481,16 +585,16 @@ async def _run(db: AsyncSession, session, user: UserTabel, content: str) -> Asyn
 
         # ── ④ settle：合成总 usage + 收尾（护栏叫停时发 task_paused，前端给"继续任务"入口）──
         if paused_reason:
-            yield _agent_event({"type": "task_paused", "reason": paused_reason,
-                                "round": round_no})
-        yield b"data: " + json.dumps({"choices": [], "usage": {
+            bus.publish(_agent_event({"type": "task_paused", "reason": paused_reason,
+                                      "round": round_no}))
+        bus.publish(b"data: " + json.dumps({"choices": [], "usage": {
             "prompt_tokens": usage_total["prompt"],
             "completion_tokens": usage_total["completion"],
-        }}, ensure_ascii=False).encode() + b"\n"
-        yield b"data: [DONE]\n"
+        }}, ensure_ascii=False).encode() + b"\n")
+        bus.publish(b"data: [DONE]\n")
     finally:
-        _RUNNING.discard(session_id)
-        approval_manager.fail_all_in_session(session_id)  # 未决审批置拒绝，防协程悬挂
+        # 总线收尾（finish 投递结束哨兵）与未决审批置拒绝由 _task_main 的 finally 统一负责
+        pass
 
 
 async def _open_round(db: AsyncSession, model: dict, channel_names: list[str],

@@ -5,6 +5,8 @@ export type agentApprovalMode = 'confirm_all' | 'confirm_critical' | 'full'
 
 /** 后端 agenticapi_agent 扩展事件（SSE 站内扩展字段的联合类型） */
 export type agentStreamEvent =
+    | { type: 'replay_start'; baseMessages: number }
+    | { type: 'task_inactive' }
     | { type: 'tool_start'; tool: string; digest?: string }
     | { type: 'tool_progress'; tool: string; done: number; total: number }
     | { type: 'sandbox_output'; tool: string; chunk: string }
@@ -49,6 +51,8 @@ export interface agentSession {
     modelName: string
     approvalMode: agentApprovalMode
     status?: string
+    /** 是否有任务正在服务端执行（有则进入会话需订阅事件流续看进度） */
+    running?: boolean
     updateTime?: string
 }
 

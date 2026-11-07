@@ -1,13 +1,16 @@
 """站点维护 Agent 接口（全部需管理员权限）
 
-- POST /maintain-agent/chat：SSE 流式对话（OpenAI 风格报文，复刻工坊 /studio/chat 模式，
-  站内扩展事件挂 agenticapi_agent 字段）——不走统一 {code,message,data} 格式；
+- POST /maintain-agent/chat：提交后台任务（立即返回 JSON；同会话已有任务在跑返回 409）——
+  任务生命周期与服务端托管，与 HTTP 请求解耦（v0.13.0）；
+- GET /maintain-agent/sessions/{id}/stream：SSE 订阅任务事件（回放缓冲 + 实时跟随 + 心跳）；
+- POST /maintain-agent/sessions/{id}/stop：取消执行中的任务；
 - POST /maintain-agent/approve：审批决议（confirm_required 卡片的批准/拒绝）；
 - GET/POST/PATCH/DELETE /maintain-agent/sessions*：会话管理（统一响应格式）。
 （v0.11.0：导出下载端点随数据治理工具下线而删除）
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import agent_setting
@@ -68,12 +71,13 @@ async def create_session(body: AgentSessionCreateSchema, db: AsyncSession = Depe
 
 @router.get("/sessions")
 async def list_sessions(db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
-    """会话列表（最近优先）"""
+    """会话列表（最近优先；running 标记供前端识别有任务在跑、需要订阅事件流）"""
     sessions = await agent_crud.list_sessions(db, admin.id)
     return success_response(message="ok", data={"list": [
         {"sessionId": s["id"], "title": s["title"], "modelName": s["model_name"],
          "approvalMode": agent_crud.resolve_approval_mode(s),
-         "status": s["status"], "updateTime": str(s["update_time"])}
+         "status": s["status"], "running": maintain_loop.is_running(s["id"]),
+         "updateTime": str(s["update_time"])}
         for s in sessions
     ]})
 
@@ -139,13 +143,37 @@ async def clear_sessions(db: AsyncSession = Depends(get_db), admin=Depends(get_c
 @router.post("/chat")
 async def agent_chat(body: AgentChatSchema, db: AsyncSession = Depends(get_db),
                      admin=Depends(get_current_admin)):
-    """维护 Agent 对话（SSE 流式）。报文 OpenAI 风格（同工坊），错误返回 {"error": {...}}"""
+    """提交维护任务：服务端托管后台执行，立即返回；页面经 /stream 订阅事件跟随"""
     session = await _get_own_session(db, body.session_id, admin)
     try:
-        return await maintain_loop.run_chat(db, session, admin, body.content.strip())
+        maintain_loop.start_task(session.id, admin.id, body.content.strip())
     except RelayError as exc:
-        maintain_loop.release_session(session.id)
-        return exc.to_response()
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return success_response(message="任务已开始", data={"sessionId": session.id})
+
+
+@router.get("/sessions/{session_id}/stream")
+async def agent_stream(session_id: int, db: AsyncSession = Depends(get_db),
+                       admin=Depends(get_current_admin)):
+    """订阅会话任务事件（SSE）：回放缓冲 + 实时跟随 + 15s 心跳保活；无任务时立即收尾"""
+    await _get_own_session(db, session_id, admin)
+    bus = maintain_loop.get_bus(session_id)
+    return StreamingResponse(
+        maintain_loop.stream_events(session_id, bus), media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/stop")
+async def agent_stop(session_id: int, db: AsyncSession = Depends(get_db),
+                     admin=Depends(get_current_admin)):
+    """停止执行中的任务（任务取消后悬挂的 tool_calls 在下次加载会话时补占位修复）"""
+    await _get_own_session(db, session_id, admin)
+    stopped = maintain_loop.stop_task(session_id)
+    if stopped:
+        await log_crud.write_log(
+            db, type="admin", action="agent_task_stop", user_id=admin.id, username=admin.username,
+            detail=f"手动停止维护Agent任务（会话 {session_id}）")
+    return success_response(message="任务已停止" if stopped else "当前没有执行中的任务",
+                            data={"stopped": stopped})
 
 
 @router.post("/approve")

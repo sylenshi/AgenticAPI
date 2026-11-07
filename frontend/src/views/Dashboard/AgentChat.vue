@@ -11,7 +11,7 @@
           </div>
           <a-select :model-value="agentStore.currentModel" size="small"
                     :style="{width: '280px'}" placeholder="切换驱动模型（下一轮生效）"
-                    :disabled="agentStore.isStreaming"
+                    :disabled="busy"
                     @change="(v: any) => agentStore.patchSession({modelName: String(v)})">
             <a-option v-for="m in availableModels" :key="m.name" :value="m.name">
               {{ m.name }}
@@ -34,7 +34,7 @@
           </span>
           <a-button type="primary" size="small" @click="continueTask">继续任务</a-button>
         </div>
-        <AgentInput :is-streaming="agentStore.isStreaming"
+        <AgentInput :is-streaming="busy"
                     @send="(text) => agentStore.send(text)" @stop="agentStore.stop()"/>
       </template>
 
@@ -200,6 +200,9 @@ const approvalModeDesc = computed(() => ({
   full: '完全权限：全部直接执行，无需确认（删除与沙箱命令仍受每会话次数上限约束）',
 }[agentStore.currentSession?.approvalMode || 'confirm_all']))
 
+/** ═══════════ 任务占用（本地订阅中，或该会话服务端有任务在跑）═══════════ */
+const busy = computed(() => agentStore.isStreaming || !!agentStore.currentSession?.running)
+
 /** ═══════════ 护栏叫停后的断点续跑 ═══════════ */
 const continueOffer = computed(() => !!agentStore.pausedReason && !agentStore.isStreaming)
 function continueTask() {
@@ -242,21 +245,21 @@ async function onApprove(payload: { approvalId: string; approved: boolean }) {
 }
 
 async function confirmRemove(sessionId: number) {
-  // 生成中的会话禁止删除：SSE 流会继续往已删除的会话 id 写消息（表无外键拦不住），留下孤儿数据
-  if (agentStore.isStreaming && sessionId === agentStore.currentSessionId) {
-    Message.warning('当前会话正在生成，请先停止再删除')
-    return
-  }
+    // 任务占用中的会话禁止删除：服务端任务会继续往已删除的会话 id 写消息（表无外键拦不住），留下孤儿数据
+    if (busy.value && sessionId === agentStore.currentSessionId) {
+        Message.warning('当前会话有任务在执行，请先停止再删除')
+        return
+    }
   const ok = await confirmDialog('删除该会话将联动删除全部消息记录，不可恢复。', '删除会话', '删除', true)
   if (ok) agentStore.removeSession(sessionId)
 }
 
-/** 一键清空：生成中禁用（流式回写目标会话会被删掉），空列表无可清项 */
+/** 一键清空：任务占用中禁用（任务回写目标会话会被删掉），空列表无可清项 */
 async function confirmClear() {
-  if (agentStore.isStreaming) {
-    Message.warning('请先停止当前生成，再清空会话')
-    return
-  }
+    if (busy.value) {
+        Message.warning('当前会话有任务在执行，请先停止再清空')
+        return
+    }
   if (!agentStore.sessions.length) {
     Message.info('当前没有可清空的会话')
     return
