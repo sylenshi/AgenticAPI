@@ -48,12 +48,9 @@ const handleLogout = async () => {
   }
 }
 
-// 已登录用户下拉菜单
+// 已登录用户下拉菜单（仅保留退出登录）
 const handleUserCommand = (key: string | number | Record<string, unknown> | undefined) => {
-  const command = String(key)
-  if (command === 'dashboard') {
-    router.push('/dashboard/overview')
-  } else if (command === 'logout') {
+  if (String(key) === 'logout') {
     void handleLogout()
   }
 }
@@ -100,10 +97,6 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
             </a>
 
             <template #content>
-              <a-doption value="dashboard">
-                <template #icon><icon-dashboard/></template>
-                控制台
-              </a-doption>
               <a-doption value="logout">
                 <template #icon><icon-export/></template>
                 退出登录
@@ -165,8 +158,8 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
 }
 
 .brand-logo-img {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-md);
   object-fit: contain;
 }

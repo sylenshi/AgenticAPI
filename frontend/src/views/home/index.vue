@@ -63,9 +63,6 @@
         </div>
         <h1 class="hero-title">由 Agent 自主运营维护的<br/><span class="hero-title-key">新一代智能 API 中转站</span>
         </h1>
-        <p class="hero-desc">
-          上游渠道自动巡检监测・下游 OpenAI 接口对外兼容
-        </p>
         <div class="hero-actions">
           <a-button type="primary" @click="goToModelsPage">查看模型广场</a-button>
           <a-button @click="handleStart">立即开始使用</a-button>
@@ -729,7 +726,7 @@ onUnmounted(() => {
 }
 
 .hero-title {
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-6);
   font-family: var(--font-display);
   font-size: clamp(36px, 4.6vw, 52px);
   font-weight: var(--font-bold);
@@ -745,12 +742,6 @@ onUnmounted(() => {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
-
-.hero-desc {
-  margin: 0 0 var(--space-6);
-  font-size: var(--text-base);
-  color: var(--color-text-secondary);
 }
 
 .hero-actions {
@@ -1376,17 +1367,22 @@ onUnmounted(() => {
 /* ═══════════ 首屏动态标识（参考 living mark，源图见 src/assets/brand） ═══════════ */
 .hero-mark {
   /* 组件整体放大：宽度、流光高度、节点尺寸一起调，节点尺寸抽成变量便于断点覆盖 */
-  --mark-node-size: clamp(112px, 13.5vw, 178px);
-  width: min(100%, 860px);
+  --mark-node-size: clamp(177px, 21.4vw, 283px);
+  width: min(100%, 1326px);
   margin: 0 auto var(--space-6);
   pointer-events: none;
+}
+
+/* 首屏单独放宽内容容器（其余分屏保持 1080px），否则放大后的组件会被卡在原宽度 */
+.slide-hero .hero-inner {
+  max-width: 1400px;
 }
 
 .mark-flow-wrap {
   position: relative;
   width: 100%;
   aspect-ratio: 1240 / 440;
-  max-height: clamp(180px, 29vh, 300px);
+  max-height: clamp(273px, 44vh, 463px);
 }
 
 .mark-flow {
@@ -1495,10 +1491,10 @@ onUnmounted(() => {
 
 @media (max-width: 768px) {
   .hero-mark {
-    --mark-node-size: clamp(96px, 26vw, 132px);
+    --mark-node-size: clamp(146px, 39vw, 198px);
     margin-bottom: var(--space-3);
   }
-  .mark-flow-wrap { max-height: clamp(140px, 24vh, 200px); }
+  .mark-flow-wrap { max-height: clamp(208px, 36vh, 299px); }
   .rb-halo { stroke-width: 18; }
   .rb-beam { stroke-width: 8; }
   .rb-head { stroke-width: 6; }
