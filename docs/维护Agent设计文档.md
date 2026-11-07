@@ -1,6 +1,6 @@
 # AgenticAPI 站点维护 Agent · 设计文档
 
-> 适用系统版本：**v0.12.0** ｜ 文档版本：v2.2 ｜ 日期：2026-11-07 ｜ 机制均已与代码核对
+> 适用系统版本：**v0.13.0** ｜ 文档版本：v2.3 ｜ 日期：2026-11-07 ｜ 机制均已与代码核对
 >
 > 工具 / Skill 明细见**附录 A / B**；改代码先看第 7 章代码地图；历史演进见 [`changelog/维护Agent版本演进.md`](changelog/维护Agent版本演进.md)。本文只描述当前状态。
 
@@ -17,6 +17,7 @@
 | 大脑可插拔 | 驱动模型为站内任意已启用模型，走中转链路天然享受渠道轮询容错，前端随时切换 |
 | 手是白名单 + 一个受控沙箱 | 23 个封闭注册工具；宿主机无 shell、无任意命令、无通用文件访问；唯一长尾出口 `sandbox_exec` 在隔离容器内执行 |
 | 高危有阀门 | 写操作按会话审批三档位决定弹卡范围；删除类另有 dry-run 两段式第二道闸；删除类与沙箱带按工具声明的会话配额，任何档位恒生效 |
+| 任务后台执行 | 任务与服务端托管（asyncio Task），与 HTTP 请求解耦——页面进出、刷新、断网均不中断任务，重新进入页面自动回放+跟随（v0.13.0） |
 | 全程留痕 | 会话消息（含工具与审批轨迹）服务端持久化，工具执行另写 `logs` 审计 |
 
 ### 1.2 能力地图
@@ -70,18 +71,20 @@
 ```mermaid
 flowchart LR
     FE["前端 /dashboard/agent<br/>三栏：会话侧栏 + 对话窗口 + 右栏控制面板"]
-    API["POST /maintain-agent/chat (SSE)<br/>POST /maintain-agent/approve<br/>会话管理端点"]
-    LOOP["Maintain Loop<br/>四阶段循环 + SSE 事件总线"]
+    API["POST /chat 提交任务<br/>GET /stream 订阅事件<br/>POST /stop 停止 + approve + 会话端点"]
+    TASK["后台任务（服务端托管 asyncio Task）<br/>四阶段循环 + SessionEventBus"]
     TOOLS["工具执行器<br/>白名单注册表 + 脱敏 + 三档位审批"]
     BRAIN["模型大脑<br/>站内任意已启用模型·可切换"]
     DB[("MySQL<br/>agent_session / agent_message")]
-    FE -->|Bearer 管理员令牌| API --> LOOP
-    LOOP <--> BRAIN
-    LOOP --> TOOLS --> DB
-    LOOP -->|SSE 事件流| FE
+    FE -->|Bearer 管理员令牌| API
+    API -->|提交| TASK
+    TASK <--> BRAIN
+    TASK --> TOOLS --> DB
+    TASK -->|事件总线| API
+    API -->|SSE 回放+跟随| FE
 ```
 
-机制借鉴成熟 Coding Agent Harness（四阶段循环、Error as Data、Skills 按需加载、执行中插话排队等）并按运维场景改造；两点关键差异——模型侧"站内模型即 Provider"，工具侧坚持封闭白名单（容器沙箱是唯一受控例外）。
+机制借鉴成熟 Coding Agent Harness（四阶段循环、Error as Data、Skills 按需加载、执行中插话排队等）并按运维场景改造；关键差异——模型侧"站内模型即 Provider"，工具侧坚持封闭白名单（容器沙箱是唯一受控例外），**任务生命周期与 HTTP 请求解耦**（v0.13.0：`POST /chat` 只提交任务立即返回，主循环跑在服务端托管的 asyncio Task 里；页面经 `GET /stream` 订阅 `SessionEventBus`——先回放任务缓冲再实时跟随，15s 心跳注释行防代理读超时；切换会话/刷新/断网只影响订阅，不影响任务）。
 
 ### 2.2 四阶段主循环
 
@@ -263,12 +266,23 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 ### 6.1 页面与 SSE 协议
 
-三栏布局：会话侧栏（新建 / 清空 / 删除）+ 对话窗口（消息流、工具状态条、审批卡、沙箱折叠控制台、输入框 + 停止按钮，头部含模型选择器；护栏叫停后输入框上方出现**继续任务**按钮）+ 右栏（**审批档位下拉**、**上下文水位进度条**、帮助弹窗；内部分级编码 L0/L1/L2 不外露，审批卡标签翻译为"写操作 / 高危操作"）。实现复用工坊组件：消息列表 `ChatMessages.vue`、输入框 `AgentInput.vue`、SSE 解析骨架泛化出 `agenticapi_agent` 事件分发；审批批准 / 拒绝调 `POST /maintain-agent/approve`；水位上限取模型列表 store 的 `contextLength`，已用取 `round_end.contextTokens`。
+三栏布局：会话侧栏（新建 / 清空 / 删除）+ 对话窗口（消息流、工具状态条、审批卡、沙箱折叠控制台、输入框 + 停止按钮，头部含模型选择器；护栏叫停后输入框上方出现**继续任务**按钮）+ 右栏（**审批档位下拉**、**上下文水位进度条**、帮助弹窗；内部分级编码 L0/L1/L2 不外露，审批卡标签翻译为"写操作 / 高危操作"）。实现复用工坊组件：消息列表 `ChatMessages.vue`、输入框 `AgentInput.vue`，SSE 解析骨架泛化出 `agenticapi_agent` 事件分发；水位上限取模型列表 store 的 `contextLength`，已用取 `round_end.contextTokens`。
 
-正文走 OpenAI 风格增量（`choices[0].delta.content / reasoning_content`），站内扩展统一挂 `agenticapi_agent` 字段。事件全集（8 个）：
+任务解耦后的交互协议（v0.13.0）：
+
+| 端点 | 行为 |
+|---|---|
+| `POST /maintain-agent/chat` | 提交任务立即返回 JSON（同会话已有任务在跑返回 409）；前端随后订阅事件流 |
+| `GET /maintain-agent/sessions/{id}/stream` | SSE 订阅：先发 `replay_start`（含 baseMessages 裁剪线）→ 回放任务缓冲 → 实时跟随 → `[DONE]`；空闲期发 `: ping` 心跳（15s）防代理读超时；无任务时发 `task_inactive` 立即收尾 |
+| `POST /maintain-agent/sessions/{id}/stop` | 取消服务端任务（前端停止按钮调用；订阅侧断开不取消任务） |
+| 会话列表 | 每项带 `running` 标记：进入 running 会话时前端自动订阅续看进度 |
+
+正文走 OpenAI 风格增量（`choices[0].delta.content / reasoning_content`），站内扩展统一挂 `agenticapi_agent` 字段。事件全集（10 个）：
 
 | 事件 | 载荷 | 前端渲染 |
 |---|---|---|
+| `replay_start` | `{baseMessages}` | 回放裁剪线：前端把已加载历史截到前 baseMessages 条，任务期消息由回放重放（-1 = 保留全部，无任务跟随） |
+| `task_inactive` | `{}` | 无任务可跟随：直接结束订阅 |
 | `tool_start` | `{tool, digest}` | 工具状态条（"正在测试渠道 zai …"） |
 | `tool_progress` | `{tool, done, total}` | 批测进度（18/30 模型），仅 `test_all_models` 发出 |
 | `tool_end` | `{tool, ok, summary}` | 状态条转结果（成功绿 / 失败红 + 摘要） |
@@ -278,7 +292,7 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 | `sandbox_output` | `{tool, chunk}` | 沙箱实时输出（折叠控制台，超长保尾部） |
 | `task_paused` | `{reason: round_limit/cost_limit, round}` | 流结束后在输入框上方展示"继续任务"一键续跑（Agent 已输出三段式小结） |
 
-模型切换不发事件（下一轮静默生效）；脱水占位是消息正文里的折叠文本，不是独立事件。会话级致命错误返回 `data: {"error": {…}}` + `[DONE]` 收尾；401 复用前端现有拦截逻辑。
+模型切换不发事件（下一轮静默生效）；脱水占位是消息正文里的折叠文本，不是独立事件。任务级异常经总线发布 `{"error": {…}}` 后收尾；401 复用前端现有拦截逻辑。已知边界：任务结束即清空回放缓冲（历史走 DB 加载）；刷新落在"某轮执行中"时，该轮已流式发出、尚未落库的增量不回放（该轮落库后下次进入可见）。
 
 ### 6.2 持久化与会话保留
 
@@ -294,7 +308,7 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 | 位置 | 职责 |
 |---|---|
-| `app/services/agent/maintain_loop.py` | 四阶段主循环 + 脱水 / 压缩 + SSE 事件总线（round_end 水位 / task_paused 断点续跑 / 续轮渠道 failover） |
+| `app/services/agent/maintain_loop.py` | 后台任务托管（start/stop/is_running）+ SessionEventBus（发布/订阅/回放/心跳）+ 四阶段主循环（脱水 / 压缩 / 续轮 failover / task_paused） |
 | `app/services/agent/registry.py` | 工具注册表 + 执行器流水线（校验 / 档位×等级查表阀门 / 会话配额 / 截断 / 审计） |
 | `app/services/agent/tools/` | 按域分文件的工具 handler（channel / usage / model / ops / skill / sandbox / web）；`data_tools.py` 仅存巡检用的 `_table_stats` 内部函数 |
 | `app/services/agent/{skills,approvals,redact}.py` | skill 加载器、审批管理器、脱敏过滤器 |
@@ -317,7 +331,8 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 7. 计费可对账（logs cost 如实）；任务成本达到上限后三段式小结收尾、前端出现"继续任务"，续跑后轮数与成本重新计算；超限会话在下次新建时被清理且留日志；
 8. skill 教学保存安全链路：非法 name 被拒、redact 后落盘、超限拒绝；
 9. 三档位行为正确（档位 × 等级查表）：`confirm_all` 写操作全弹卡 / `confirm_critical` 仅 L2 弹卡 / `full` 全直行；删除类 10 次、沙箱 30 次会话配额任何档位恒生效；
-10. 沙箱 MySQL 桥接开启后，data-governance 脚本可统计真实行数且输出无明文凭证；关闭时沙箱与数据库隔离。
+10. 任务执行中关闭页面 / 刷新 / 断网，任务继续执行；重新进入会话自动回放+跟随；`POST /stop` 可随时取消；同会话并发提交返回 409；
+11. 沙箱 MySQL 桥接开启后，data-governance 脚本可统计真实行数且输出无明文凭证；关闭时沙箱与数据库隔离。
 
 开放问题：模型"支持工具调用"名单目前用内置名单 + 运行时降级探测，后续可考虑给 `llm_models` 加 `supports_tools` 布尔列（需手动 DDL）。
 
@@ -424,6 +439,7 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 | 12 | 护栏以"任务成本上限"（system_config 可调）替代累计 token 预算；轮数 24→40 且末段软提示 | prompt token 每轮重复携带完整上下文，累计 token 随轮数近平方增长，预算必然先于轮数触发且口径与计费脱节；成本才是真正要保护的资源，与计费天然对齐；软提示软着陆替代硬腰斩，叫停后 task_paused + 前端一键续跑 |
 | 13 | 删除工具级 always_confirm 标记：原强审 5 工具按行为等价原则并入等级（create_channel/create_model/delete_skill/sandbox_exec → L2，save_skill → L1），执行上限改为按工具声明的 session_limit | always_confirm 实质是横切在等级之上的隐藏"L1.5"，三档行为与 L2 完全一致；等级 × 档位一张查表后无任何例外名单，体系从 4 个维度收敛为 2 个维度 + 1 个数据化配额列 |
 | 14 | 压缩兜底改为沿 user 边界整轮折叠至窗口 60%；每轮请求统一 `_open_round`（复用渠道 + 同渠道重试 + 跨渠道 failover） | 原按消息条数估算放大 9 倍导致压缩永不触发、超窗后被上游 400 打断；续轮原先零重试零切换，单渠道一次抖动即中断长任务 |
+| 15 | 任务生命周期与 HTTP 请求解耦（v0.13.0）：`POST /chat` 提交服务端托管的 asyncio Task，`GET /stream` 订阅 SessionEventBus（回放+跟随+心跳），`POST /stop` 取消 | 长任务原寄生在单个 SSE 请求里，页面刷新/离开/断网即中断，且前端"重进页面自动 stop"放大了问题；运维长任务需要"任务后台跑、人只在审批时出现"的形态，这也是后续 MCP / CLI 接入的事件地基 |
 
 ---
 
