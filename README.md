@@ -1,6 +1,6 @@
 # AgenticAPI
 
-> LLM API 中转站平台 ｜ 当前版本 v0.10.0（2026-11-05）｜ 持续迭代中
+> LLM API 中转站平台 ｜ 当前版本 v0.10.1（2026-11-07）｜ 持续迭代中
 
 基于 Agent 的 API 中转站：对外提供 OpenAI 兼容的大模型接口（密钥鉴权、分组权限、渠道轮询、按 token 计费），配套模型工坊 Playground 与站点维护 Agent（36 个白名单运维工具 + 容器沙箱）。前端 Vue3 + TypeScript，后端 FastAPI + Python（全异步），数据库 MySQL。
 
@@ -67,7 +67,7 @@ AgenticAPI/
 │       ├── constants/    # 常量定义
 │       ├── router/       # 路由（分级登录守卫）
 │       └── types/        # TS 类型定义
-├── docs/                 # 设计文档（接口规范、数据库设计、维护 Agent 文档、UI 规范等 5 份）
+├── docs/                 # 设计文档（接口规范、数据库设计、维护 Agent 文档、UI 规范等 5 份）+ changelog/（历次排查修复清单）
 ├── deploy.bat            # 云端一键部署脚本（本地使用）
 └── README.md
 ```
@@ -117,6 +117,7 @@ npm run build      # 生产构建
 | [`docs/维护Agent设计文档.md`](docs/维护Agent设计文档.md) | 维护 Agent 设计与功能：循环与护栏、审批与脱敏机制、36 个工具清单 |
 | [`docs/前端UI构建规范.md`](docs/前端UI构建规范.md) | 前端视觉与组件规范 |
 | [`docs/AgenticCLI与MCP封装构想.md`](docs/AgenticCLI与MCP封装构想.md) | 规划中的 CLI / MCP 封装设想 |
+| [`docs/changelog/`](docs/changelog) | 历次全面排查的修复清单与遗留问题记录 |
 
 ## 规划中
 
@@ -128,6 +129,7 @@ npm run build      # 生产构建
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| v0.10.1 | 2026-11-07 | 第 1 次全面排查修复（后端 13 项 / 前端 16 项 / 数据库 12 项）：封禁令牌即时失效、拨测改 POST + 60s 频控、注册分组站点可配、404/405 与 OpenAI 路径报文统一、数据库唯一约束 / 索引补齐、时区统一 +08:00 等；完整清单见 `docs/changelog/` |
 | v0.10.0 | 2026-11-05 | 维护 Agent 能力扩展（27 → 36 工具）：容器沙箱 `sandbox_exec`、渠道 / 模型 CRUD、联网搜索工具、密钥脱敏加固 |
 | v0.9.0 | 2026-10-05 | 维护 Agent 上线：四阶段循环、27 白名单工具三级风险管控、审批卡、6 内置技能、会话服务端持久化 |
 | v0.8.1 | 2026-10-03 | 注册分组策略调整：注册统一进 vip、访客固定 free |
