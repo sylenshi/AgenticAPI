@@ -29,6 +29,11 @@ INITIAL_BALANCE_DEFAULT = Decimal("0")
 REGISTER_USER_GROUP_KEY = "register_user_group"
 REGISTER_USER_GROUP_DEFAULT = "vip"
 
+# 维护 Agent 单次任务成本上限的配置键（元；一条用户消息触发的完整工具循环），
+# 超限后 Agent 输出三段式小结收尾，前端给"继续任务"一键续跑
+AGENT_TASK_COST_LIMIT_KEY = "agent_task_cost_limit"
+AGENT_TASK_COST_LIMIT_DEFAULT = Decimal("2.00")
+
 
 async def get_value(db: AsyncSession, key: str, default: str | None = None) -> str | None:
     """按配置键读取配置值，不存在返回 default"""
@@ -77,3 +82,12 @@ async def get_register_user_group(db: AsyncSession) -> str:
     """读取正式注册用户的默认分组，未配置或值非法时返回默认 vip"""
     value = await get_value(db, REGISTER_USER_GROUP_KEY)
     return value if value in ("free", "vip") else REGISTER_USER_GROUP_DEFAULT
+
+
+async def get_agent_task_cost_limit(db: AsyncSession) -> Decimal:
+    """读取维护 Agent 单次任务成本上限（元），未配置或值非法时返回默认 2.00"""
+    value = await get_value(db, AGENT_TASK_COST_LIMIT_KEY)
+    try:
+        return max(Decimal(value).quantize(Decimal("0.01")), Decimal("0"))
+    except (TypeError, ValueError, ArithmeticError):
+        return AGENT_TASK_COST_LIMIT_DEFAULT

@@ -39,6 +39,14 @@
           <template v-if="effectiveModel">.env → 站内首个启用模型解析，当前实际生效：<b>{{ effectiveModel }}</b></template>
           <template v-else>.env → 站内首个启用模型解析</template>
         </p>
+        <div class="settings-row">
+          <span class="settings-label">单任务成本上限</span>
+          <a-input-number
+              v-model="form.agentTaskCostLimit" :min="0" :max="100000" :precision="2" :step="0.5"
+              mode="button" :style="{width: '160px'}"
+          />
+          <span class="settings-tip">一条指令触发的完整任务累计费用达到该值（元）后，Agent 自动小结收尾，可在对话中一键继续（0 = 不限）</span>
+        </div>
       </div>
 
       <!-- 用户注册配置 -->
@@ -94,6 +102,7 @@ const effectiveModel = ref('')
 const form = reactive({
   chatRecordMaxTokens: 5000,
   agentDefaultModel: '',
+  agentTaskCostLimit: 2,
   registerInitialBalance: 0,
   guestInitialBalance: 0,
   registerUserGroup: 'vip',
@@ -103,6 +112,7 @@ let snapshot = {...form}
 const hasChanges = computed(() =>
     form.chatRecordMaxTokens !== snapshot.chatRecordMaxTokens
     || (form.agentDefaultModel ?? '') !== snapshot.agentDefaultModel
+    || form.agentTaskCostLimit !== snapshot.agentTaskCostLimit
     || form.registerInitialBalance !== snapshot.registerInitialBalance
     || form.guestInitialBalance !== snapshot.guestInitialBalance
     || form.registerUserGroup !== snapshot.registerUserGroup,
@@ -130,6 +140,7 @@ async function loadSettings() {
     const res = await getSiteSettings()
     form.chatRecordMaxTokens = res.data.chatRecordMaxTokens
     form.agentDefaultModel = res.data.agentDefaultModel
+    form.agentTaskCostLimit = res.data.agentTaskCostLimit
     form.registerInitialBalance = res.data.registerInitialBalance
     form.guestInitialBalance = res.data.guestInitialBalance
     form.registerUserGroup = res.data.registerUserGroup === 'free' ? 'free' : 'vip'
@@ -149,6 +160,7 @@ async function save() {
     const payload: Record<string, string | number> = {}
     if (form.chatRecordMaxTokens !== snapshot.chatRecordMaxTokens) payload.chatRecordMaxTokens = form.chatRecordMaxTokens
     if ((form.agentDefaultModel ?? '') !== snapshot.agentDefaultModel) payload.agentDefaultModel = form.agentDefaultModel ?? ''
+    if (form.agentTaskCostLimit !== snapshot.agentTaskCostLimit) payload.agentTaskCostLimit = form.agentTaskCostLimit
     if (form.registerInitialBalance !== snapshot.registerInitialBalance) payload.registerInitialBalance = form.registerInitialBalance
     if (form.guestInitialBalance !== snapshot.guestInitialBalance) payload.guestInitialBalance = form.guestInitialBalance
     if (form.registerUserGroup !== snapshot.registerUserGroup) payload.registerUserGroup = form.registerUserGroup

@@ -1,8 +1,8 @@
-<!-- 审批卡片：工具名 + 风险等级标签 + 参数 + 影响预览 + 倒计时 + 批准/拒绝（L2 高危为 danger 语义） -->
+<!-- 审批卡片：工具名 + 操作类型标签 + 参数 + 影响预览 + 倒计时 + 批准/拒绝（关键操作为 danger 语义） -->
 <template>
   <div class="approval-card" :class="[`risk-${confirm.riskLevel.toLowerCase()}`, confirm.status]">
     <div class="approval-head">
-      <span class="risk-tag" :class="confirm.riskLevel.toLowerCase()">{{ confirm.riskLevel }}</span>
+      <span class="risk-tag" :class="confirm.riskLevel.toLowerCase()">{{ riskLabel }}</span>
       <span class="approval-tool">{{ confirm.tool }}</span>
       <span v-if="confirm.status === 'pending'" class="approval-countdown">{{ countdown }}s 后自动拒绝</span>
       <span v-else class="approval-verdict" :class="confirm.status">
@@ -45,6 +45,13 @@ const argsText = computed(() => {
         return String(props.confirm.args)
     }
 })
+
+/** 操作类型标签：内部 L1/L2 编码不外露，翻译成用户可读措辞 */
+const riskLabel = computed(() => ({
+    L2: '高危操作',
+    L1: '写操作',
+    L0: '只读',
+}[props.confirm.riskLevel] ?? '操作'))
 
 const verdictText = computed(() => ({
     approved: '已批准',

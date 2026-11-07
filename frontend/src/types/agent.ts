@@ -13,6 +13,7 @@ export type agentStreamEvent =
     | { type: 'confirm_resolved'; approvalId: string; result: 'approved' | 'rejected' | 'timeout' }
     | { type: 'model_switched'; from: string; to: string }
     | { type: 'round_end'; round: number; usageSoFar: { promptTokens: number; completionTokens: number }; contextTokens?: number }
+    | { type: 'task_paused'; reason: 'round_limit' | 'cost_limit'; round: number }
 
 /** 消息内渲染的工具执行记录（tool_start/progress/end 聚合） */
 export interface agentToolEvent {

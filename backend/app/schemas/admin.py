@@ -34,6 +34,7 @@ class SettingsUpdateSchema(BaseModel):
     """
     chat_record_max_tokens: int | None = Field(default=None, ge=100, le=1_000_000, alias="chatRecordMaxTokens")
     agent_default_model: str | None = Field(default=None, max_length=128, alias="agentDefaultModel")
+    agent_task_cost_limit: Decimal | None = Field(default=None, ge=0, le=100_000, alias="agentTaskCostLimit")
     register_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000, alias="registerInitialBalance")
     guest_initial_balance: Decimal | None = Field(default=None, ge=0, le=100_000, alias="guestInitialBalance")
     register_user_group: str | None = Field(default=None, alias="registerUserGroup")

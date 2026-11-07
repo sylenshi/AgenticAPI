@@ -30,6 +30,7 @@ class AgentMessageTable(BaseModel):
     # assistant 发起的工具调用数组：[{id, type, function: {name, arguments}}]
     tool_calls: Mapped[list | None] = mapped_column(JSON, comment="assistant 发起的工具调用（含参数）")
     tool_call_id: Mapped[str | None] = mapped_column(String(64), comment="tool 消息回指的调用ID")
+    tool_name: Mapped[str | None] = mapped_column(String(64), comment="工具名（tool 消息；会话配额计数用）")
     risk_level: Mapped[str | None] = mapped_column(String(4), comment="工具风险等级：L0 / L1 / L2")
     approval_status: Mapped[str | None] = mapped_column(String(16), default="none",
                                                         server_default="none",

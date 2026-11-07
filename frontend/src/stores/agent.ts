@@ -90,6 +90,8 @@ export const useAgentStore = defineStore('agent', () => {
     const isStreaming = ref(false)
     /** 当前上下文占用（最近一轮 prompt_tokens，round_end 更新；切会话时从历史最后一条 assistant 消息恢复） */
     const contextTokens = ref<number | null>(null)
+    /** 护栏叫停原因（task_paused 事件置位；"继续任务"按钮入口，发送后清空） */
+    const pausedReason = ref<'round_limit' | 'cost_limit' | null>(null)
     let abortController: AbortController | null = null
 
     const currentSession = computed(() =>
@@ -124,6 +126,7 @@ export const useAgentStore = defineStore('agent', () => {
         currentSessionId.value = sessionId
         messages.value = []
         contextTokens.value = null
+        pausedReason.value = null
         try {
             const res = await listAgentMessages(sessionId)
             messages.value = mapHistory(res.data.list)
@@ -188,6 +191,7 @@ export const useAgentStore = defineStore('agent', () => {
         if (!currentSession.value || isStreaming.value || !content.trim()) return
         const sessionId = currentSession.value.sessionId
         const sessionTitle = currentSession.value.title
+        pausedReason.value = null  // 新任务开始，撤下"继续任务"入口
 
         messages.value.push({
             id: genStudioId(), role: 'user', content: content.trim(),
@@ -304,6 +308,11 @@ export const useAgentStore = defineStore('agent', () => {
                     if (ev.contextTokens && ev.contextTokens > 0) contextTokens.value = ev.contextTokens
                     break
                 }
+                case 'task_paused': {
+                    // 护栏（轮数/成本）叫停：Agent 已输出收尾小结，流结束后展示"继续任务"按钮
+                    pausedReason.value = ev.reason
+                    break
+                }
             }
         }
 
@@ -375,7 +384,7 @@ export const useAgentStore = defineStore('agent', () => {
     }
 
     return {
-        sessions, currentSessionId, messages, isStreaming, contextTokens,
+        sessions, currentSessionId, messages, isStreaming, contextTokens, pausedReason,
         currentSession, currentModel,
         loadSessions, createSession, selectSession, removeSession, clearSessions, patchSession,
         send, stop, approve,

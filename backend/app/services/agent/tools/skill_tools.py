@@ -1,7 +1,8 @@
 """技能域工具：F5 load / list / save / delete（教学保存已决策开放）
 
-save_skill / delete_skill 带 always_confirm：写入内容影响后续所有会话（技能池
-全局共享），即使会话开启"L1 自动批准"也强制走审批卡片，且卡片展示完整草稿。
+save_skill 归 L1（可逆写：同名覆盖即恢复，落盘前过 redact）；delete_skill 归 L2
+（删除自定义技能文件不可逆），写入内容影响后续所有会话（技能池全局共享），
+审批卡展示完整草稿。
 """
 
 from app.crud import channel as channel_crud
@@ -96,20 +97,20 @@ def register_skill_tools() -> None:
     ))
     register(ToolDef(
         name="save_skill",
-        description="把运维经验固化为自定义 skill 加入技能池（强制全文审批）：name 需为小写字母/数字/连字符的 slug；content 为 SOP 正文（Markdown，≤32KB）；同名覆盖更新。",
+        description="把运维经验固化为自定义 skill 加入技能池（审批卡展示全文草稿）：name 需为小写字母/数字/连字符的 slug；content 为 SOP 正文（Markdown，≤32KB）；同名覆盖更新。",
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "skill 名（slug：^[a-z0-9][a-z0-9-]{1,63}$）"},
             "description": {"type": "string", "description": "一句话用途描述（目录展示与触发匹配用）"},
             "triggers": {"type": "string", "description": "触发关键词（逗号分隔，可选）"},
             "content": {"type": "string", "description": "SOP 正文（Markdown：步骤/判据/报告模板）"},
         }, "required": ["name", "description", "content"]},
-        risk="L1", handler=save_skill, always_confirm=True, preview=_save_skill_preview,
+        risk="L1", handler=save_skill, preview=_save_skill_preview,
     ))
     register(ToolDef(
         name="delete_skill",
-        description="删除指定自定义 skill（内置 skill 不可删；强制审批）。",
+        description="删除指定自定义 skill（不可逆删除，内置 skill 不可删；审批卡展示影响预览）。",
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "要删除的自定义 skill 名"},
         }, "required": ["name"]},
-        risk="L1", handler=delete_skill, always_confirm=True, preview=_delete_skill_preview,
+        risk="L2", handler=delete_skill, preview=_delete_skill_preview, session_limit=10,
     ))

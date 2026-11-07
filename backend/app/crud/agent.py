@@ -45,6 +45,7 @@ async def insert_message(
     content: str | None = None,
     tool_calls: list | None = None,
     tool_call_id: str | None = None,
+    tool_name: str | None = None,
     risk_level: str | None = None,
     approval_status: str | None = None,
     prompt_tokens: int = 0,
@@ -57,6 +58,7 @@ async def insert_message(
         content=content,
         tool_calls=tool_calls,
         tool_call_id=tool_call_id,
+        tool_name=tool_name,
         risk_level=risk_level,
         approval_status=approval_status,
         prompt_tokens=prompt_tokens,
@@ -91,18 +93,27 @@ async def list_messages(db: AsyncSession, session_id: int) -> list[dict]:
     return rows
 
 
-async def count_l2_executed(db: AsyncSession, session_id: int) -> int:
-    """统计会话内已执行成功的 L2 工具次数（每会话 5 次上限的计数口径）"""
+async def count_tool_executions(db: AsyncSession, session_id: int) -> dict[str, int]:
+    """按工具名统计会话内已执行成功的次数（会话配额计数口径）。
+
+    返回 dict：tool_name → 次数；另有特殊键 "_legacy_l2" 承接 tool_name 列上线前的
+    旧 L2 记录（彼时只有 delete_channel / delete_model 两工具，由调用方并入二者计数）。
+    成功口径 = 非 isError 结果（isError 结果由异常路径产生，不会到达配额累加）。
+    """
     result = await db.execute(
         text("""
-            SELECT COUNT(*) FROM agent_message
-            WHERE session_id = :sid AND role = 'tool' AND risk_level = 'L2'
-              AND approval_status = 'approved'
+            SELECT
+              COALESCE(tool_name, '_legacy_l2') AS tool_key,
+              COUNT(*) AS cnt
+            FROM agent_message
+            WHERE session_id = :sid AND role = 'tool'
+              AND (tool_name IS NOT NULL OR (risk_level = 'L2' AND approval_status = 'approved'))
               AND content NOT LIKE '%"isError": true%'
+            GROUP BY tool_key
         """),
         {"sid": session_id},
     )
-    return result.scalar_one()
+    return {r["tool_key"]: int(r["cnt"]) for r in result.mappings().all()}
 
 
 async def get_session(db: AsyncSession, session_id: int) -> AgentSessionTable | None:

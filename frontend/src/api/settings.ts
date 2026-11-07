@@ -6,6 +6,7 @@ export interface siteSettingsSchema {
     chatRecordMaxTokens: number
     agentDefaultModel: string
     agentEffectiveModel: string
+    agentTaskCostLimit: number
     registerInitialBalance: number
     guestInitialBalance: number
     registerUserGroup: string
@@ -13,7 +14,7 @@ export interface siteSettingsSchema {
 
 /** 可更新字段（部分更新语义：只传变化的字段） */
 export type siteSettingsUpdate = Partial<Pick<
-    siteSettingsSchema, 'chatRecordMaxTokens' | 'agentDefaultModel' | 'registerInitialBalance' | 'guestInitialBalance' | 'registerUserGroup'
+    siteSettingsSchema, 'chatRecordMaxTokens' | 'agentDefaultModel' | 'agentTaskCostLimit' | 'registerInitialBalance' | 'guestInitialBalance' | 'registerUserGroup'
 >>
 
 /** 读取站点设置 */

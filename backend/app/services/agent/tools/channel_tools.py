@@ -326,7 +326,7 @@ def register_channel_tools() -> None:
     ))
     register(ToolDef(
         name="update_channel",
-        description="修改渠道配置（L1 写操作，需审批）：启用/停用 status、超时 timeout（秒）、描述、支持模型列表 support_models。渠道名与密钥不可改。",
+        description="修改渠道配置（可逆写操作）：启用/停用 status、超时 timeout（秒）、描述、支持模型列表 support_models。渠道名与密钥不可改。",
         parameters={"type": "object", "properties": {
             "channel_name": {"type": "string", "description": "渠道名（定位键）"},
             "status": {"type": "boolean", "description": "启用 true / 停用 false"},
@@ -344,7 +344,7 @@ def register_channel_tools() -> None:
     ))
     register(ToolDef(
         name="create_channel",
-        description=("新增上游渠道（L1 写操作，强制审批）：接入新上游的入口。需要 channel_name / base_url（OpenAI 兼容端点）/"
+        description=("新增上游渠道（关键写操作，影响计费与流量）：接入新上游的入口。需要 channel_name / base_url（OpenAI 兼容端点）/"
                      "/ api_key / support_models（该渠道支持的上游模型名列表）。创建后建议 test_channel 拨测验证。"
                      "密钥只在审批与落库路径上瞬时存在，任何返回与卡片都不展示明文。"),
         parameters={"type": "object", "properties": {
@@ -357,15 +357,15 @@ def register_channel_tools() -> None:
             "status": {"type": "boolean", "description": "初始状态（默认启用）"},
             "description": {"type": "string", "description": "渠道描述（可选，≤200字）"},
         }, "required": ["channel_name", "base_url", "api_key", "support_models"]},
-        risk="L1", handler=create_channel, always_confirm=True, preview=_create_channel_preview,
+        risk="L2", handler=create_channel, preview=_create_channel_preview,
     ))
     register(ToolDef(
         name="delete_channel",
-        description=("删除上游渠道（L2 高危，两阶段）：首次必须 dry_run=true 预览（含哪些出站模型绑定此渠道的孤儿引用影响），"
+        description=("删除上游渠道（不可逆删除，两阶段）：首次必须 dry_run=true 预览（含哪些出站模型绑定此渠道的孤儿引用影响），"
                      "向管理员展示预览并确认同意后，再 dry_run=false 真删。有模型绑定时建议先 update_model 解绑。"),
         parameters={"type": "object", "properties": {
             "channel_name": {"type": "string", "description": "渠道名（定位键）"},
             "dry_run": {"type": "boolean", "description": "true=预览影响（首次必传），false=真删（需管理员确认预览后）"},
         }, "required": ["channel_name", "dry_run"]},
-        risk="L2", handler=delete_channel, preview=_delete_channel_preview,
+        risk="L2", handler=delete_channel, preview=_delete_channel_preview, session_limit=10,
     ))

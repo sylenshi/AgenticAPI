@@ -307,9 +307,9 @@ def register_model_tools() -> None:
     ))
     register(ToolDef(
         name="create_model",
-        description=("新增出站模型（L1 写操作，强制审批）：新上游上线的完整入口，需绑定已存在渠道"
+        description=("新增出站模型（关键写操作，直接决定对外计费）：新上游上线的完整入口，需绑定已存在渠道"
                      "（先 create_channel）。定价单位为元/百万token（is_request_mode=true 时按次计费），"
-                     "直接决定对外计费，审批卡展示完整定价。创建后建议 test_model 拨测。"),
+                     "审批卡展示完整定价。创建后建议 test_model 拨测。"),
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "对外模型名（唯一，调用方使用）"},
             "model_group": {"type": "string", "enum": ["free", "vip"], "description": "分组：free 免费模型 / vip 付费模型"},
@@ -327,11 +327,11 @@ def register_model_tools() -> None:
             "status": {"type": "boolean", "description": "初始状态（默认启用）"},
             "is_log": {"type": "boolean", "description": "是否记录对话全文（默认 false）"},
         }, "required": ["name", "model_group", "channels", "input_price", "output_price"]},
-        risk="L1", handler=create_model, always_confirm=True, preview=_create_model_preview,
+        risk="L2", handler=create_model, preview=_create_model_preview,
     ))
     register(ToolDef(
         name="update_model",
-        description="修改出站模型配置（L1 写操作，需审批）：定价（输入/缓存/输出/按次）、分组、渠道绑定、上游名映射、上下文窗口、启停等。模型名不可改。审批卡展示字段级前后 diff。",
+        description="修改出站模型配置（可逆写操作）：定价（输入/缓存/输出/按次）、分组、渠道绑定、上游名映射、上下文窗口、启停等。模型名不可改。审批卡展示字段级前后 diff。",
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "模型名（定位键）"},
             "label": {"type": "string"}, "model_group": {"type": "string", "enum": ["free", "vip"]},
@@ -347,11 +347,11 @@ def register_model_tools() -> None:
     ))
     register(ToolDef(
         name="delete_model",
-        description=("删除出站模型（L2 高危，两阶段）：首次必须 dry_run=true 预览（含哪些渠道的 support_models "
+        description=("删除出站模型（不可逆删除，两阶段）：首次必须 dry_run=true 预览（含哪些渠道的 support_models "
                      "仍声明此模型的孤儿影响），向管理员展示预览并确认同意后，再 dry_run=false 真删。"),
         parameters={"type": "object", "properties": {
             "name": {"type": "string", "description": "模型名（定位键）"},
             "dry_run": {"type": "boolean", "description": "true=预览影响（首次必传），false=真删（需管理员确认预览后）"},
         }, "required": ["name", "dry_run"]},
-        risk="L2", handler=delete_model, preview=_delete_model_preview,
+        risk="L2", handler=delete_model, preview=_delete_model_preview, session_limit=10,
     ))

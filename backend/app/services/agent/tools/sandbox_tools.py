@@ -72,8 +72,8 @@ def register_sandbox_tools() -> None:
             "timeout_seconds": {"type": "integer",
                                 "description": f"命令超时秒数（5~{sandbox_setting.SANDBOX_CMD_TIMEOUT_MAX}，默认 60）"},
         }, "required": ["command"]},
-        risk="L1", handler=sandbox_exec, always_confirm=True,
-        preview=_sandbox_exec_preview, timeout=480,
+        risk="L2", handler=sandbox_exec,
+        preview=_sandbox_exec_preview, timeout=480, session_limit=30,
     ))
     register(ToolDef(
         name="sandbox_status",

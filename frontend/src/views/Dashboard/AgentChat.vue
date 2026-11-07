@@ -27,6 +27,13 @@
           <h3>新会话已就绪</h3>
           <p>在下方输入框描述运维目标即可开始，例如：<br>「巡检全部渠道并把异常的停用」「统计 logs 表占用并清理 90 天前的日志」</p>
         </div>
+        <!-- 护栏叫停后的断点续跑入口（Agent 已输出小结，一键以预置指令继续） -->
+        <div v-if="continueOffer" class="continue-bar">
+          <span class="continue-text">
+            {{ agentStore.pausedReason === 'cost_limit' ? '任务已达成本上限，Agent 已小结收尾' : '任务已达轮数上限，Agent 已小结收尾' }}
+          </span>
+          <a-button type="primary" size="small" @click="continueTask">继续任务</a-button>
+        </div>
         <AgentInput :is-streaming="agentStore.isStreaming"
                     @send="(text) => agentStore.send(text)" @stop="agentStore.stop()"/>
       </template>
@@ -36,7 +43,7 @@
         <icon-robot class="empty-icon"/>
         <h3>站点维护 Agent</h3>
         <p>用一句话完成复合运维：测渠道、巡检模型、查额度水位、统计并清理数据表。<br>
-          写操作是否弹审批卡由右侧「审批档位」决定，L2 高危清理默认必弹。</p>
+          写操作是否需要你确认由右侧「审批档位」决定，删除类高危操作默认必弹。</p>
         <a-button type="primary" @click="agentStore.createSession()">开始新会话</a-button>
       </div>
     </section>
@@ -92,18 +99,8 @@
             {{ formatTokens(agentStore.contextTokens || 0) }} / {{ formatTokens(contextLength) }} tokens
             （{{ Math.round(contextPercent * 100) }}%）
           </div>
-          <div class="panel-desc">≥70% 橙色（触发历史压缩），≥90% 红色</div>
         </template>
         <div v-else class="panel-desc">当前驱动模型未配置上下文窗口长度，暂无水位读数</div>
-      </div>
-
-      <div class="panel-section">
-        <div class="panel-title">风险等级</div>
-        <div class="risk-legend">
-          <div class="risk-item"><span class="risk-dot l0"></span>L0 只读工具</div>
-          <div class="risk-item"><span class="risk-dot l1"></span>L1 低危工具</div>
-          <div class="risk-item"><span class="risk-dot l2"></span>L2 高危工具</div>
-        </div>
       </div>
 
       <div class="panel-section">
@@ -154,6 +151,7 @@ const usageHtml = md.render(`
 ### 对话与计费
 - **大脑模型**：由当前会话选定的模型驱动，每次调用按站点定价计入**你的管理员余额**（免费模型不扣费）；调用流水可在「监控面板 → 调用日志」按关键字 *维护Agent* 对账
 - **随时换脑**：右上角选择器可切换站内任意启用模型，**下一轮生效**，上下文不丢失
+- **成本护栏**：一条指令触发的完整任务累计费用达到「设置页 → 单任务成本上限」（默认 2 元）后，Agent 自动小结收尾，对话下方出现**继续任务**按钮，一键接着跑（轮数、成本均按任务重新计算）
 
 ### 怎么下达任务
 - 一句话描述目标即可，无需拆步骤：\`出一份巡检报告\`、\`测一遍所有渠道\`、\`统计 logs 表占用并清理 90 天前的日志\`
@@ -161,29 +159,29 @@ const usageHtml = md.render(`
 
 ### 内置技能（SOP）
 - 已内置六个运维 SOP：**站点巡检 / 数据治理 / 渠道排障 / 额度水位研判 / 新模型上线 / 故障复盘**，自然语言即可触发
-- **教它新技能**：口述内容让它保存（"记住一个叫 xxx 的技能：……"）；保存与删除属于强审名单，弹卡与否由审批档位决定
+- **教它新技能**：口述内容让它保存（"记住一个叫 xxx 的技能：……"）；保存前会弹审批卡展示完整草稿
 
 ### 数据治理（沙箱连库）
 - 数据统计 / 清理由它在**容器沙箱**内跑数据库脚本完成（技能：data-governance）；先统计与预览，你确认后才分批删除
 - 大数据全量导出沙箱拿不出来（输出上限 64KB），需要时登服务器用 mysqldump
 `)
 const safetyHtml = md.render(`
-### 工具风险分级（共 23 个白名单工具）
-| 等级 | 范围 | 执行方式 |
+### 操作确认（共 23 个白名单工具）
+| 类型 | 范围 | 执行方式 |
 | --- | --- | --- |
-| **L0 只读**（15 个） | 巡检 / 统计 / 拨测 / 查询 | 直接执行，不打扰 |
-| **L1 低危写**（4 个） | 渠道改配置 / 技能保存删除 | 按审批档位弹卡或直行 |
-| **L2 高危写**（2 个） | 删除渠道 / 删除模型（两段式 dry-run） | 默认必弹审批卡 |
+| **只读**（14 个） | 巡检 / 统计 / 拨测 / 查询 | 直接执行，不打扰 |
+| **普通写**（3 个） | 修改渠道 / 模型配置、保存技能 | 按审批档位确认或直行 |
+| **关键操作**（6 个） | 删除渠道 / 模型 / 技能、新增渠道 / 模型、沙箱命令 | 默认必弹确认卡 |
 
 ### 审批档位（右侧面板可切换）
 - **需要审批**（默认）：所有写操作都弹审批卡
-- **部分审批**：仅 L2 高危 + 沙箱命令 + 强审名单（新增渠道/模型、技能保存/删除）弹卡，其余低危写直行
-- **完全权限**：全部直行不弹卡（风险自担，审计照常）
+- **部分审批**：仅关键操作（删除、新增渠道/模型、沙箱命令）弹卡，普通配置修改直行
+- **完全权限**：全部直接执行（风险自担，审计照常）
 
 ### 硬性护栏
-- L2 每会话**最多 5 次**真删（任何档位都生效）；审批卡片 **300 秒**未操作自动按拒绝处理
-- 删除渠道 / 模型走**两段式**：先 dry-run 预览影响 → 你批准后才真删
-- 单轮对话上限 24 次工具调用、上下文 200k token，超限自动收敛结束
+- 删除渠道 / 模型 / 技能每会话**最多 10 次**、沙箱命令每会话**最多 30 次**（任何档位都生效）；审批卡片 **300 秒**未操作自动按拒绝处理
+- 删除渠道 / 模型走**两段式**：先预览影响 → 你批准后才真删
+- 单任务上限 40 轮工具调用、成本达到设置页上限（默认 2 元）自动小结收尾，可一键继续
 
 ### 密钥与审计
 - 渠道密钥**全程递归脱敏**：界面只显示掩码（如 \`sk-1****wxyz\`），数据库与前端均不存密钥原文
@@ -195,12 +193,18 @@ const safetyHtml = md.render(`
 const availableModels = computed(() =>
     (modelListStore.totalModelList || []).filter(m => (m as any).status !== 0))
 
-/** ═══════════ 审批档位（v0.11.0 三档位）═══════════ */
+/** ═══════════ 审批档位（三档位 × 只读/普通写/关键操作查表）═══════════ */
 const approvalModeDesc = computed(() => ({
   confirm_all: '需要审批：所有写操作（含沙箱命令）都弹审批卡',
-  confirm_critical: '部分审批：仅 L2 高危、沙箱命令与强审名单弹卡，其余低危写直行',
-  full: '完全权限：全部直行不弹卡（L2 每会话 5 次上限仍生效）',
+  confirm_critical: '部分审批：仅关键操作（删除、新增渠道/模型、沙箱命令）弹卡，普通配置修改直行',
+  full: '完全权限：全部直接执行，无需确认（删除与沙箱命令仍受每会话次数上限约束）',
 }[agentStore.currentSession?.approvalMode || 'confirm_all']))
+
+/** ═══════════ 护栏叫停后的断点续跑 ═══════════ */
+const continueOffer = computed(() => !!agentStore.pausedReason && !agentStore.isStreaming)
+function continueTask() {
+  agentStore.send('继续执行未完成的任务，从上次小结中的"建议的续作步骤"接着做。')
+}
 
 /** ═══════════ 上下文水位（17.1：窗口上限 × 最近一轮 prompt_tokens）═══════════ */
 const currentModelInfo = computed(() =>
@@ -501,26 +505,22 @@ async function confirmClear() {
   font-variant-numeric: tabular-nums;
 }
 
-.risk-legend {
+/* ── 断点续跑入口条：护栏叫停后出现在输入框上方 ── */
+.continue-bar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-2);
+  padding: 8px 12px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-light);
+}
+
+.continue-text {
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
 }
-
-.risk-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 8px;
-  transform: translateY(-0.5px);
-}
-
-.risk-dot.l0 { background: var(--color-success); }
-.risk-dot.l1 { background: var(--color-warning); }
-.risk-dot.l2 { background: var(--color-error); }
 
 .help-actions {
   display: flex;

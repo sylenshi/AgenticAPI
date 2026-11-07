@@ -121,6 +121,7 @@ async def get_settings(
         "chatRecordMaxTokens": await config_crud.get_chat_record_threshold(db),
         "agentDefaultModel": agent_configured,
         "agentEffectiveModel": agent_effective,
+        "agentTaskCostLimit": float(await config_crud.get_agent_task_cost_limit(db)),
         "registerInitialBalance": float(await config_crud.get_initial_balance(db, config_crud.REGISTER_INITIAL_BALANCE_KEY)),
         "guestInitialBalance": float(await config_crud.get_initial_balance(db, config_crud.GUEST_INITIAL_BALANCE_KEY)),
         "registerUserGroup": await config_crud.get_register_user_group(db),
@@ -155,6 +156,9 @@ async def update_settings(
         name = model_name.strip()
         await config_crud.set_value(db, config_crud.AGENT_DEFAULT_MODEL_KEY, name)
         detail_parts.append(f"Agent默认模型={name or '(恢复默认链)'}")
+    if "agent_task_cost_limit" in updates:
+        await config_crud.set_value(db, config_crud.AGENT_TASK_COST_LIMIT_KEY, str(updates["agent_task_cost_limit"]))
+        detail_parts.append(f"Agent任务成本上限={updates['agent_task_cost_limit']} 元")
     for field, key, label in (
         ("register_initial_balance", config_crud.REGISTER_INITIAL_BALANCE_KEY, "注册初始余额"),
         ("guest_initial_balance", config_crud.GUEST_INITIAL_BALANCE_KEY, "访客初始余额"),
