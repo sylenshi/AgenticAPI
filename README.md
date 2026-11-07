@@ -49,7 +49,7 @@ AgenticAPI/
 │   │   ├── core/         # 配置、数据库引擎与会话
 │   │   ├── router/       # API 路由层（relay / studio / maintain_agent / user / keys / redeem / admin / monitor / channels / models / operations / site）
 │   │   ├── schemas/      # Pydantic 请求/响应模型（驼峰别名映射）
-│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、agent/ 维护Agent 循环与 23 工具、sandbox_service 容器沙箱、studio_agent_service 工坊搜索循环、search_service 联网搜索、probe_service 拨测）
+│   │   ├── services/     # 业务逻辑层（relay_service 核心中转、agent/ 维护Agent 循环与 25 工具、sandbox_service 容器沙箱、studio_agent_service 工坊搜索循环、search_service 联网搜索、probe_service 拨测）
 │   │   ├── crud/         # 数据访问层（原生 SQL）
 │   │   ├── models/       # SQLAlchemy 表定义
 │   │   ├── agent_skills/ # 维护 Agent 内置技能（Markdown SOP，frontmatter 元数据）
@@ -87,7 +87,7 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --host 127.0.0.1 --port 2027
 ```
 
-表结构启动时自动创建（只建不存在的表，已有表不自动加列）。可选能力（工坊语音 / 联网搜索 `STEPFUN_API_KEY`、会话起标题 `AGENT_TITLE_MODEL`、沙箱 7 项 `SANDBOX_*` 等）均在 `.env.example` 中有注释说明，不配置时对应功能自动降级或提示未配置。
+表结构启动时自动创建（只建不存在的表，已有表不自动加列）。可选能力（工坊语音 / 联网搜索 `STEPFUN_API_KEY`、会话起标题 `AGENT_TITLE_MODEL`、沙箱 `SANDBOX_*` 系列等）均在 `.env.example` 中有注释说明，不配置时对应功能自动降级或提示未配置。
 
 ### 前端
 
@@ -128,12 +128,12 @@ npm run build      # 生产构建
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
-| v0.14.1 | 2026-11-07 | 维护 Agent 首轮实战复盘修复（会话导出暴露）：redact 两处误伤——`max_tokens` 等业务统计字段键名豁免（原被 "token" 子串误掩成 `****`）、已掩码形态的值（apiKeyHint 尾 4 位提示）不再二次处理；`web_search` 自截断（Agent 侧 6 条 × 220 字摘要，修字符/字节口径不一致导致的必然整体折叠，三连空转），工坊默认配额不变；`list_upstream_models` 404 提示去除前导分隔符、summary 不再重复 error 全文；沙箱描述补"境内出口仅国内站点可达（境外站点不通，联网核实用 web_search）"；折叠/截断提示文案去除已下线的"导出类工具"说法；无需 DDL |
-| v0.14.0 | 2026-11-07 | 维护 Agent 安全用钥通道：需要密钥的上游操作改为后端代持密钥执行（Agent 只引用渠道名，密钥不进对话上下文/沙箱）——新增 `list_upstream_models`（代持密钥拉上游 /models 清单做模型发现，404 提示改走试拨）、`test_channel` 放宽为可试拨声明列表外候选模型（`notInDeclaredList` 标注）、恢复 `rotate_channel_key`（L2 审批卡只显尾 4 位，凭证到期可闭环）；工具 23→25（L0 15 / L1 3 / L2 7）；修正系统提示词与沙箱描述"拉上游模型清单用沙箱"的自相矛盾指引；新增会话记录一键导出（`GET /sessions/{id}/export` Markdown：正文/工具调用/结果/审批轨迹，右栏侧边栏按钮自动下载）；无需 DDL |
-| v0.13.0 | 2026-11-07 | 维护 Agent 任务与请求解耦：`POST /maintain-agent/chat` 改为提交服务端托管的后台任务（立即返回，同会话并发 409），新增 `GET /sessions/{id}/stream` 订阅事件流（回放缓冲 + 实时跟随 + 15s 心跳防代理超时）与 `POST /sessions/{id}/stop` 停止端点，会话列表带 `running` 标记；页面进出 / 刷新 / 断网不再中断任务，重新进入会话自动回放+跟随续看进度；前端移除"切换会话自动停止"逻辑，停止按钮改为取消服务端任务；无需 DDL |
-| v0.12.0 | 2026-11-07 | 维护 Agent 护栏与工具体系重构：护栏以单任务成本上限（默认 ¥2，设置页可调）替代累计 token 预算，轮数 24→40 且末段软提示软着陆，叫停发 task_paused 支持前端一键续跑；修复压缩兜底失效与续轮零容错（统一 `_open_round`：复用渠道 + 重试 + 跨渠道 failover）；工具体系删除 always_confirm 标记，原强审 5 工具按行为等价并入等级（create_channel / create_model / delete_skill / sandbox_exec → L2 关键写，save_skill → L1），执行上限改为按工具声明的会话配额（删除类 10 次、沙箱 30 次），阀门收敛为档位 × 等级一张查表；`agent_message` 加 `tool_name` 列（配额按工具名计数）；前端右栏下线风险等级图例、审批卡与帮助文案去内部分级话术，设置页新增单任务成本上限；需手动 DDL：`agent_message` 加 `tool_name` 列 |
-| v0.11.0 | 2026-11-07 | 维护 Agent 三项改进：工具精简 36→23（下线 rotate_channel_key / get_redeem_stats / query_users / switch_model，合并上游用量与凭证到期，数据治理 8 工具改由 data-governance 技能 + 沙箱连库脚本承载，导出链路下线）；审批分级收敛为三档位（需要审批 / 部分审批 / 完全权限，L2 每会话 5 次上限恒生效）；右栏新增上下文水位进度条（round_end 新增 contextTokens）；沙箱可选桥接站内 MySQL（SANDBOX_MYSQL_HOST）+ 镜像加装 pymysql；需手动 DDL：`agent_session` 加 `approval_mode` 列 |
-| v0.10.1 | 2026-11-07 | 第 1 次全面排查修复（后端 13 项 / 前端 16 项 / 数据库 12 项）：封禁令牌即时失效、拨测改 POST + 60s 频控、注册分组站点可配、404/405 与 OpenAI 路径报文统一、数据库唯一约束 / 索引补齐、时区统一 +08:00 等；完整清单见 `docs/changelog/` |
+| v0.14.1 | 2026-11-07 | 维护 Agent 首轮实战复盘修复：redact 键名误伤豁免（`max_tokens` 等）与已掩码值不二次处理、`web_search` 自截断修字节口径、提示与沙箱描述文案清理 |
+| v0.14.0 | 2026-11-07 | 维护 Agent 安全用钥通道：需钥上游操作改后端代持执行（`list_upstream_models` 新增、`test_channel` 放宽、`rotate_channel_key` 恢复），工具 23→25，会话记录一键导出 |
+| v0.13.0 | 2026-11-07 | 维护 Agent 任务后台执行：任务提交与执行解耦（服务端托管），事件流回放 + 跟随订阅，页面刷新 / 断网不再中断 |
+| v0.12.0 | 2026-11-07 | 维护 Agent 护栏与工具体系重构：单任务成本上限（默认 ¥2）、轮数 24→40、审批弹卡收敛为档位 × 等级查表、执行上限按工具声明配额（删除类 10 次 / 沙箱 30 次） |
+| v0.11.0 | 2026-11-07 | 维护 Agent 精简：工具 36→23（数据治理改技能 + 沙箱连库）、审批收敛三档位、右栏上下文水位条、沙箱可连站内 MySQL |
+| v0.10.1 | 2026-11-07 | 第 1 次全面排查修复：后端 13 / 前端 16 / 数据库 12 项（封禁令牌即时失效、404/405 报文统一、数据库约束索引补齐、时区统一等） |
 | v0.10.0 | 2026-11-05 | 维护 Agent 能力扩展（27 → 36 工具）：容器沙箱 `sandbox_exec`、渠道 / 模型 CRUD、联网搜索工具、密钥脱敏加固 |
 | v0.9.0 | 2026-10-05 | 维护 Agent 上线：四阶段循环、27 白名单工具三级风险管控、审批卡、6 内置技能、会话服务端持久化 |
 | v0.8.1 | 2026-10-03 | 注册分组策略调整：注册统一进 vip、访客固定 free |
