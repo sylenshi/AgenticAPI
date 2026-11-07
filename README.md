@@ -67,7 +67,7 @@ AgenticAPI/
 │       ├── constants/    # 常量定义
 │       ├── router/       # 路由（分级登录守卫）
 │       └── types/        # TS 类型定义
-├── docs/                 # 设计文档（接口规范、数据库设计、维护 Agent 文档、UI 规范等 5 份）+ changelog/（历次排查修复清单）
+├── docs/                 # 设计文档（接口规范、数据库设计、维护 Agent 文档、UI 规范等 4 份）+ changelog/（历次排查修复与版本演进记录）
 ├── deploy.bat            # 云端一键部署脚本（本地使用）
 └── README.md
 ```
@@ -116,8 +116,7 @@ npm run build      # 生产构建
 | [`docs/数据库设计文档.md`](docs/数据库设计文档.md) | 全部表结构与设计说明 |
 | [`docs/维护Agent设计文档.md`](docs/维护Agent设计文档.md) | 维护 Agent 设计与功能：循环与护栏、审批三档位与脱敏机制、23 个工具清单 |
 | [`docs/前端UI构建规范.md`](docs/前端UI构建规范.md) | 前端视觉与组件规范 |
-| [`docs/AgenticCLI与MCP封装构想.md`](docs/AgenticCLI与MCP封装构想.md) | 规划中的 CLI / MCP 封装设想 |
-| [`docs/changelog/`](docs/changelog) | 历次全面排查的修复清单与遗留问题记录 |
+| [`docs/changelog/`](docs/changelog) | 历次全面排查的修复清单、遗留问题与维护 Agent 版本演进记录 |
 
 ## 规划中
 
