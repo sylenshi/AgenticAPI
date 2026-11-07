@@ -32,9 +32,14 @@ def search_available() -> bool:
     return bool(agent_setting.STEPFUN_API_KEY)
 
 
-async def web_search(query: str, timeout: int = 20) -> str:
+async def web_search(query: str, timeout: int = 20,
+                     max_results: int = MAX_RESULTS,
+                     snippet_limit: int = CONTENT_SNIPPET_LIMIT) -> str:
     """
     执行一次联网搜索，把结果格式化成模型友好的文本（编号 + 标题 + URL + 时间 + 摘要）。
+
+    max_results / snippet_limit 可调小以压缩回传体积（维护 Agent 工具侧用小配额，
+    避免结果字节量超过工具结果 8KB 截断线被整体折叠；工坊走默认值不受影响）。
 
     任何失败都不抛异常，而是返回一段带说明的文本——让模型能感知"这次没搜到"
     并继续作答（降级），而不是把整条对话流打断。
@@ -76,7 +81,7 @@ async def web_search(query: str, timeout: int = 20) -> str:
         return "搜索服务返回异常（结果解析失败），请基于已有知识回答并说明未能联网核实。"
     if not results:
         return f"未搜索到与「{query}」相关的结果，请基于已有知识回答并说明。"
-    return _format_results(query, results)
+    return _format_results(query, results, max_results=max_results, snippet_limit=snippet_limit)
 
 
 def _parse_mcp_results(resp: httpx.Response) -> list[dict] | None:
@@ -129,9 +134,11 @@ def _parse_mcp_results(resp: httpx.Response) -> list[dict] | None:
     return [r for r in results if isinstance(r, dict) and r.get("url")]
 
 
-def _format_results(query: str, results: list[dict]) -> str:
-    """把结果列表排版成给模型看的纯文本"""
-    taken = results[:MAX_RESULTS]
+def _format_results(query: str, results: list[dict],
+                    max_results: int = MAX_RESULTS,
+                    snippet_limit: int = CONTENT_SNIPPET_LIMIT) -> str:
+    """把结果列表排版成给模型看的纯文本（max_results / snippet_limit 可压缩体积）"""
+    taken = results[:max_results]
     lines = [f"以下是「{query}」的联网搜索结果（共 {len(taken)} 条，按相关性排序）：", ""]
     for i, r in enumerate(taken, 1):
         title = (r.get("title") or "").strip() or "(无标题)"
@@ -141,7 +148,7 @@ def _format_results(query: str, results: list[dict]) -> str:
         content = (r.get("content") or "").strip()
         # snippet 与 content 高度重复时只保留更长的那个，避免双倍 token
         digest = content if len(content) > len(snippet) else snippet
-        digest = digest[:CONTENT_SNIPPET_LIMIT]
+        digest = digest[:snippet_limit]
         head = f"[{i}] {title}" + (f"（{date}）" if date else "") + f"\nURL: {url}"
         lines.append(head + (f"\n摘要: {digest}" if digest else ""))
         lines.append("")

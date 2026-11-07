@@ -10,8 +10,13 @@ from app.services import search_service
 from app.services.agent.registry import ToolContext, ToolDef, register
 
 # 回传模型的结果截断（工具结果最终仍会过 registry 的 8KB 截断管线）
+# 注意截断器按字节（8KB）计而这里按字符计：中文 3 字节/字符，故源头上用小配额
+# （6 条 × 220 字摘要 ≈ 最坏 6.5KB 字节），避免超限被整体折叠（v0.14.1 修复）
 RESULT_MAX_CHARS = 6000
 QUERY_MAX_CHARS = 200
+# Agent 工具侧的搜索配额（工坊调用走 search_service 默认值 8 条 × 500 字，不受影响）
+AGENT_MAX_RESULTS = 6
+AGENT_SNIPPET_LIMIT = 220
 
 
 async def web_search_tool(ctx: ToolContext, args: dict) -> dict:
@@ -26,7 +31,8 @@ async def web_search_tool(ctx: ToolContext, args: dict) -> dict:
         raise ValueError("联网搜索未配置（后端 .env 缺少 STEPFUN_API_KEY），"
                          "请基于已有知识回答并向管理员说明无法联网核实")
 
-    result = await search_service.web_search(query)
+    result = await search_service.web_search(
+        query, max_results=AGENT_MAX_RESULTS, snippet_limit=AGENT_SNIPPET_LIMIT)
     return {
         "query": query,
         "result": result[:RESULT_MAX_CHARS],

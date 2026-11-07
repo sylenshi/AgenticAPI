@@ -124,7 +124,7 @@ async def list_upstream_models(ctx: ToolContext, args: dict) -> dict:
         result["declaredSupportModels"] = parse_json_list(channel.get("support_models"))
         result["_summary"] = f"渠道 {channel_name} 上游共 {result['total']} 个模型（{result['latencyMs']}ms）"
     else:
-        result["_summary"] = f"拉取上游模型清单失败（HTTP {result.get('status')}）：{str(result.get('error'))[:80]}"
+        result["_summary"] = f"拉取上游模型清单失败（HTTP {result.get('status')}），原因与建议见 error 字段"
     return result
 
 

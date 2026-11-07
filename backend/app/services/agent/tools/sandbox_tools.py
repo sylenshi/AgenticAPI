@@ -61,7 +61,8 @@ def register_sandbox_tools() -> None:
     register(ToolDef(
         name="sandbox_exec",
         description=("在隔离的 Linux 容器沙箱内执行任意 shell 命令（审批卡展示完整命令，是否弹卡由会话审批档位决定）。"
-                     "内置 curl / jq / python3(+httpx/pymysql)，可访问公网；已注入站内 MySQL 连接环境变量"
+                     "内置 curl / jq / python3(+httpx/pymysql)，可访问公网（注意：云端出口仅国内站点可达，"
+                     "duckduckgo/google 等境外站点一般不通，联网核实优先用 web_search）；已注入站内 MySQL 连接环境变量"
                      "（MYSQL_HOST/PORT/USER/PASSWORD/DATABASE，数据治理用，严禁查询凭证列）。适用场景：无需密钥的 API 端点"
                      "测试、脚本化批量诊断、站内数据统计/治理脚本。注意：渠道密钥永不注入沙箱——需要密钥的上游操作"
                      "（拉上游模型清单 list_upstream_models、拨测/候选试拨 test_channel、轮换密钥 rotate_channel_key）"

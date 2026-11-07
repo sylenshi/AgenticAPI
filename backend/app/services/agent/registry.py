@@ -108,14 +108,14 @@ def truncate_result(result: Any) -> str:
             if isinstance(value, list) and len(value) > 5:
                 head, tail = value[:3], value[-2:]
                 trimmed = dict(result)
-                trimmed[key] = head + [f"[…已截断：中间 {len(value) - 5} 条省略，明细可请求导出文件…]"] + tail
+                trimmed[key] = head + [f"[…已截断：中间 {len(value) - 5} 条省略，可缩小查询范围后重查…]"] + tail
                 trimmed["truncated"] = True
                 new_text = _dumps(trimmed)
                 if len(new_text.encode("utf-8")) <= RESULT_MAX_BYTES:
                     return new_text
         # 仍然超限：退化为摘要对象
         fallback: dict = {"truncated": True,
-                          "message": "结果过大已整体折叠，请改用导出类工具或缩小查询范围"}
+                          "message": "结果过大已整体折叠，请缩小查询范围或拆分后重试"}
         if isinstance(result.get("_summary"), str):
             fallback["_summary"] = result["_summary"]
         return _dumps(fallback)

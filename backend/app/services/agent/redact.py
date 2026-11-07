@@ -5,7 +5,9 @@
 匹配规则：键名（不区分大小写）命中敏感词，或字符串值形如长密钥（sk- / Bearer 开头）；
 v0.10.0 起补充子串级匹配——长文本（如沙箱命令）内嵌的 sk-/Bearer 凭证同样掩码；
 v0.11.0 补充 mysql://user:pass@ 连接串掩码（沙箱 MySQL 桥接后可能出现在命令/输出里，
-注入容器的 MYSQL_PASSWORD 经键名 password 规则天然命中）。
+注入容器的 MYSQL_PASSWORD 经键名 password 规则天然命中）；
+v0.14.1 修复两处误伤：max_tokens 等业务统计字段键名豁免；已是 "****" 掩码形态的值
+（如 apiKeyHint 尾 4 位提示）不再二次处理。
 """
 
 import re
@@ -16,6 +18,16 @@ SENSITIVE_KEY_PATTERNS = (
     "token", "access_token", "refresh_token",
     "password", "authorization", "auth", "cookie", "secret",
 )
+
+# 键名豁免（精确匹配，小写比较）：形似敏感词但实为业务统计字段（v0.14.1 修复误伤）
+# —— "token" 子串会命中 max_tokens / prompt_tokens 等纯数值字段，把它们整成 "****"
+SENSITIVE_KEY_EXEMPTS = frozenset({
+    "max_tokens", "maxtokens",
+    "prompt_tokens", "prompttokens",
+    "completion_tokens", "completiontokens",
+    "cached_tokens", "cachedtokens",
+    "total_tokens", "totaltokens",
+})
 
 # 字符串值形态脱敏：长随机串凭证（sk-xxx / Bearer xxx / x-api-key 形态）
 _SECRET_VALUE_RE = re.compile(r"^(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S{8,}|[A-Za-z0-9_\-]{32,})$")
@@ -30,6 +42,8 @@ _MYSQL_URI_RE = re.compile(r"(mysql(?:\+asyncmy)?://[^:/@\s]+:)([^@\s/]+)(@)")
 
 def _is_sensitive_key(key: str) -> bool:
     k = str(key).lower()
+    if k in SENSITIVE_KEY_EXEMPTS:
+        return False
     return any(p in k for p in SENSITIVE_KEY_PATTERNS)
 
 
@@ -49,7 +63,9 @@ def redact(data):
     if isinstance(data, dict):
         out = {}
         for key, value in data.items():
-            if _is_sensitive_key(key) and isinstance(value, str) and value:
+            if isinstance(value, str) and value.startswith("****"):
+                out[key] = value  # 已是掩码形态（如 apiKeyHint 尾 4 位提示），不再二次处理
+            elif _is_sensitive_key(key) and isinstance(value, str) and value:
                 out[key] = _mask_value(value)
             elif _is_sensitive_key(key) and value is not None and not isinstance(value, (dict, list)):
                 out[key] = _mask_value(str(value))

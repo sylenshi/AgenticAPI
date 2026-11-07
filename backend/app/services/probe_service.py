@@ -92,10 +92,13 @@ async def list_upstream_models(base_url: str, api_key: str, timeout: int = 20) -
             err = str(resp.json().get("error", {}).get("message") or resp.text)[:160]
         except Exception:
             err = resp.text[:160]
+        hint = ""
         if resp.status_code == 404:
-            err += "；上游无 /models 路由（agent plan 等专用端点常见），可改用 test_channel 对候选模型逐名试拨"
+            hint = "上游无 /models 路由（agent plan 等专用端点常见），可改用 test_channel 对候选模型逐名试拨"
         elif resp.status_code == 401:
-            err += "；渠道密钥可能已失效或无权限，可用 rotate_channel_key 更新后重试"
+            hint = "渠道密钥可能已失效或无权限，可用 rotate_channel_key 更新后重试"
+        # 上游响应体可能解析不出 message（err 为空），拼接时避免出现前导分隔符
+        err = f"{err}；{hint}" if err and hint else (hint or err)
         return {"ok": False, "latencyMs": latency_ms, "status": resp.status_code, "error": err}
     except httpx.HTTPError as exc:
         return {"ok": False, "latencyMs": int((time.time() - start) * 1000), "status": 0,
