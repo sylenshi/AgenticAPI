@@ -24,6 +24,9 @@ class UserTabel(BaseModel):
     password: Mapped[str] = mapped_column(String(255), nullable=False, comment="密码（加密存储）")
     nickname: Mapped[Optional[str]] = mapped_column(String(50), comment="昵称")
     phone: Mapped[Optional[str]] = mapped_column(String(20), unique=True, comment="手机号")
+    # 头像URL：预设头像固定放前端 /avatars/avatar-N.png（6选1，后端只存URL字符串，不做上传），
+    # NULL 表示未设置（前端回退显示用户名首字符）；已有库需手动 DDL，见 docs/数据库设计文档.md
+    avatar: Mapped[Optional[str]] = mapped_column(String(255), comment="头像URL（预设6选1）")
     # 访客标记：访客账号由 /user/guest 创建（随机用户名密码、令牌24小时），
     # 无权调用管理类接口，且会被惰性清理（见 crud/user.py 的 clean_expired_guests）
     is_guest: Mapped[bool] = mapped_column(

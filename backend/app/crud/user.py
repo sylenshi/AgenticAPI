@@ -15,6 +15,20 @@ from app.schemas.user import UserLoginSchema
 from app.utils.security import hash_password, verify_password
 
 
+# 预设头像池：6 张头像固定放前端 frontend/public/avatars/（构建后由 nginx 托管），
+# 数据库只存 URL 字符串，后端不做图片上传与存储
+AVATAR_OPTIONS = [f"/avatars/avatar-{i}.png" for i in range(1, 7)]
+
+
+def pick_random_avatar(exclude: Optional[str] = None) -> str:
+    """
+    从预设头像池随机挑一张；exclude 用于"切换头像"时保证换出来的与当前不同
+    （当前值不在池里或为 None 时，从全池随机）
+    """
+    candidates = [url for url in AVATAR_OPTIONS if url != exclude] or AVATAR_OPTIONS
+    return secrets.choice(candidates)
+
+
 # 根据用户名查询用户信息
 async def get_user_by_username(db: AsyncSession, username: str) -> Optional[UserTabel]:
     """
@@ -34,12 +48,14 @@ async def create_user(db: AsyncSession, user_data: UserLoginSchema) -> UserTabel
     hashed_password = hash_password(user_data.password)
     # 再创建用户（正式注册默认分组读站点设置 register_user_group，free / vip，默认 vip；
     # 访客走 create_guest_user 固定 free）
-    # 初始余额读站点设置（system_config.register_initial_balance，默认 0），只对新注册生效
+    # 初始余额读站点设置（system_config.register_initial_balance，默认 0），只对新注册生效；
+    # 初始头像从预设 6 张中随机抽取（注册即有头像，无需用户手动设置）
     user = UserTabel(
         username=user_data.username,
         password=hashed_password,
         user_group=await config_crud.get_register_user_group(db),
         balance=await config_crud.get_initial_balance(db, config_crud.REGISTER_INITIAL_BALANCE_KEY),
+        avatar=pick_random_avatar(),
     )
     db.add(user)  # 这里不使用await，因为add方法是同步的
     await db.commit()
@@ -145,7 +161,8 @@ async def create_guest_user(db: AsyncSession) -> UserTabel:
     创建临时访客账号
     """
     suffix = uuid.uuid4().hex[:8]  # 随机后缀，保证用户名不重复
-    # 初始余额读站点设置（system_config.guest_initial_balance，默认 0，与正式注册独立配置）
+    # 初始余额读站点设置（system_config.guest_initial_balance，默认 0，与正式注册独立配置）；
+    # 访客同样随机分配预设头像，与正式注册口径一致
     user = UserTabel(
         username=f"guest_{suffix}",
         password=hash_password(secrets.token_urlsafe(16)),
@@ -153,6 +170,7 @@ async def create_guest_user(db: AsyncSession) -> UserTabel:
         is_guest=True,
         user_group="free",  # 访客显式固定 free 分组（仅免费模型），与正式注册的 vip 区分
         balance=await config_crud.get_initial_balance(db, config_crud.GUEST_INITIAL_BALANCE_KEY),
+        avatar=pick_random_avatar(),
     )
     db.add(user)
     await db.commit()

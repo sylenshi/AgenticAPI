@@ -25,6 +25,7 @@ class UserInfoSchema(BaseModel):
     username: str
     nickname: Optional[str] = None
     phone: Optional[str] = None
+    avatar: Optional[str] = None  # 预设头像URL（/avatars/avatar-N.png），None 时前端回退首字符
     is_guest: bool = Field(default=False, alias="isGuest")
     is_admin: bool = Field(default=False, alias="isAdmin")
     balance: Decimal = Field(default=0, alias="balance")

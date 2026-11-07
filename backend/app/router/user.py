@@ -20,6 +20,7 @@ from app.crud.user import (
     authenticate_user,
     delete_user_token,
     touch_last_login,
+    pick_random_avatar,
 )
 from app.crud import log as log_crud
 from app.utils.auth import get_current_user, bearer_scheme
@@ -131,6 +132,22 @@ async def update_profile(body: UserProfileUpdateSchema, user=Depends(get_current
     )
     refreshed = await get_user_by_id(db, user.id)
     return success_response(message="资料更新成功", data=UserInfoSchema.model_validate(refreshed))
+
+
+@router.put("/avatar")
+async def update_avatar(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """
+    切换头像：从预设 6 张中随机换一张（保证与当前不同，当前为空则纯随机），无需请求体
+    （预设头像由前端静态托管，后端只负责挑选并落库 URL，不做图片上传）
+    """
+    new_avatar = pick_random_avatar(exclude=user.avatar)
+    await update_user_by_id(db, user.id, {"avatar": new_avatar})
+    await log_crud.write_log(
+        db, type="user", action="update_avatar", user_id=user.id, username=user.username,
+        detail=f"切换头像（{new_avatar}）",
+    )
+    refreshed = await get_user_by_id(db, user.id)
+    return success_response(message="头像已切换", data=UserInfoSchema.model_validate(refreshed))
 
 
 @router.delete("/logout")

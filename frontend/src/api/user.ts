@@ -27,6 +27,11 @@ export function updateProfile(data: { nickname?: string; phone?: string }) {
     return request.put<userInfoSchema>('/user/profile', data)
 }
 
+/** 切换头像：后端从预设 6 张中随机换一张（与当前不同），返回更新后的用户信息 */
+export function updateAvatar() {
+    return request.put<userInfoSchema>('/user/avatar')
+}
+
 /** 登出（删除服务端令牌，令牌立即失效） */
 export function logout() {
     return request.delete<null>('/user/logout')

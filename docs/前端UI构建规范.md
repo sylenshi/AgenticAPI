@@ -156,6 +156,13 @@ import LobeIcon from '@/components/common/LobeIcon.vue'
 
 ---
 
+## 8.5 导航栏用户头像与下拉菜单（AppHeader）
+
+- **头像**（v0.15.0）：已登录显示预设头像图（`userInfo.avatar`，前端静态资源 `/avatars/avatar-N.png` 共 6 张，`a-avatar` 32px 圆形 + `object-fit: cover` 裁剪，视觉高度与左侧 36px 品牌 logo 协调）；`avatar` 为 null（存量老账号）回退显示展示名首字符主色圆标，两种形态共用 `.user-avatar` 基础样式。
+- **下拉菜单**（`a-dropdown trigger="click"`）：三项 —— ①「余额 X.XX 元」（`icon-safe`，数字 `tabular-nums`、`formatAmount` 两位小数，点击跳 `/dashboard/overview`）；②「切换头像」（`icon-swap`，点击调 `PUT /user/avatar` 随机换一张，无需确认弹窗）；③ 分隔线 +「退出登录」（`icon-export`，保留红色确认弹窗）。菜单展开时调一次 `fetchUserInfo()` 刷新余额实时值。
+
+---
+
 ## 9. 对话消息与 Markdown 排版（模型工坊）
 
 工坊对话窗口（`components/studio/ChatMessages.vue`）是全站唯一的富 markdown 渲染场景，排版规则集中在其 `.markdown-body` 的 `:deep` 规则里，**新增渲染需求扩展这里，不要另起炉灶**：

@@ -6,6 +6,8 @@ export interface userInfoSchema {
     username: string;
     nickname: string | null;
     phone: string | null;
+    /** 预设头像URL（/avatars/avatar-N.png）；null 表示未设置，导航栏回退显示首字符圆标 */
+    avatar: string | null;
     isGuest: boolean;
     isAdmin: boolean;
     /** 注意：后端 Decimal 序列化为字符串（如 "0.000000"），保证金额精度不丢 */

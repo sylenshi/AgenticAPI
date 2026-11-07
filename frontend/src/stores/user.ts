@@ -15,6 +15,7 @@ import {
     logout as logoutApi,
     guestLogin as guestLoginApi,
     getUserInfo,
+    updateAvatar as updateAvatarApi,
 } from '@/api/user'
 import type {userInfoSchema} from '@/types'
 
@@ -88,6 +89,13 @@ export const useUserStore = defineStore('user', () => { // 当前pinia的ID，�
             // 令牌无效或已过期时请求拦截器会统一清理登录态，这里无需重复处理
             console.warn('获取用户信息失败:', error)
         }
+    }
+
+    // 切换头像：后端从预设 6 张中随机换一张，用返回的用户信息整体回填（导航栏头像即时更新）
+    async function updateAvatarAction() {
+        const res = await updateAvatarApi()
+        userInfo.value = res.data
+        return res.data
     }
 
 
@@ -168,6 +176,7 @@ export const useUserStore = defineStore('user', () => { // 当前pinia的ID，�
         guestAction,
         logoutAction,
         fetchUserInfo,
+        updateAvatarAction,
         openAuthDialog,
         closeAuthDialog,
         consumeRedirectAfterLogin,

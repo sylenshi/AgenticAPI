@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Message } from '@arco-design/web-vue'
 // 顶栏小尺寸主标：由 src/assets/brand/logosmall.png 生成（首屏节点用 logo.png）
@@ -7,6 +7,7 @@ import logoImage from '@/assets/images/logo-icon.png'
 import { navItems } from '@/constants/nav'
 import { useUserStore } from '@/stores/user'
 import { confirmDialog } from '@/utils/feedback'
+import { formatAmount } from '@/utils/format'
 import AuthDialog from '@/components/auth/AuthDialog.vue'
 import GuestDialog from '@/components/auth/GuestDialog.vue'
 
@@ -36,6 +37,12 @@ const userStore = useUserStore()
 // 访客注意事项弹窗（局部状态即可，只有这里会打开它）
 const guestDialogVisible = ref(false)
 
+// 当前用户头像URL（预设6选1，后端下发；空值回退显示首字符圆标）
+const avatarUrl = computed(() => userStore.userInfo?.avatar || '')
+
+// 余额展示（下拉菜单）：金额为字符串下发，统一走 formatAmount 保精度，缺值按 0.00 展示
+const balanceText = computed(() => formatAmount(userStore.userInfo?.balance, 2, '0.00'))
+
 // 登出：确认后删除服务端令牌；若正处在控制台等需登录页面，则回到首页
 const handleLogout = async () => {
   const confirmed = await confirmDialog('确定退出登录吗？', '退出登录', '退出登录', true)
@@ -48,9 +55,30 @@ const handleLogout = async () => {
   }
 }
 
-// 已登录用户下拉菜单（仅保留退出登录）
+// 切换头像：后端从预设 6 张中随机换一张（与当前不同），返回的用户信息回填后导航栏即时更新
+const handleUpdateAvatar = async () => {
+  try {
+    await userStore.updateAvatarAction()
+    Message.success('头像已切换')
+  } catch (error) {
+    // 失败提示由请求层统一弹出，这里无需重复处理
+    console.warn('切换头像失败:', error)
+  }
+}
+
+// 下拉菜单展开时刷新一次用户信息：余额随调用/兑换实时变化，展开即见最新值
+const handleDropdownVisibleChange = (visible: boolean) => {
+  if (visible) void userStore.fetchUserInfo()
+}
+
+// 已登录用户下拉菜单：余额跳转概览、切换头像、退出登录
 const handleUserCommand = (key: string | number | Record<string, unknown> | undefined) => {
-  if (String(key) === 'logout') {
+  const command = String(key)
+  if (command === 'balance') {
+    router.push('/dashboard/overview')
+  } else if (command === 'avatar') {
+    void handleUpdateAvatar()
+  } else if (command === 'logout') {
     void handleLogout()
   }
 }
@@ -88,16 +116,28 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
 
 
         <template v-else>
-          <a-dropdown trigger="click" @select="handleUserCommand">
+          <a-dropdown trigger="click" @select="handleUserCommand" @popup-visible-change="handleDropdownVisibleChange">
 
             <a class="user-entry" href="javascript:void(0)">
-              <a-avatar :size="26" class="user-avatar">{{ userStore.displayName.charAt(0) }}</a-avatar>
+              <!-- 有预设头像显示图片（overflow:hidden 由 Arco avatar 自带，裁成圆形），否则回退首字符 -->
+              <a-avatar v-if="avatarUrl" :size="32" class="user-avatar user-avatar-img">
+                <img :src="avatarUrl" alt="头像"/>
+              </a-avatar>
+              <a-avatar v-else :size="32" class="user-avatar">{{ userStore.displayName.charAt(0) }}</a-avatar>
               <span class="user-name" :title="userStore.displayName">{{ userStore.displayName }}</span>
               <icon-down class="user-arrow"/>
             </a>
 
             <template #content>
-              <a-doption value="logout">
+              <a-doption value="balance" class="user-balance-option">
+                <template #icon><icon-safe/></template>
+                余额 {{ balanceText }} 元
+              </a-doption>
+              <a-doption value="avatar">
+                <template #icon><icon-swap/></template>
+                切换头像
+              </a-doption>
+              <a-doption value="logout" class="user-logout-option">
                 <template #icon><icon-export/></template>
                 退出登录
               </a-doption>
@@ -271,17 +311,35 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
   font-weight: var(--font-semibold);
 }
 
+/* 图片头像：img 撑满圆框裁剪（Arco avatar 自带 overflow:hidden 兜底） */
+.user-avatar-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 下拉菜单：余额数字等宽对齐（UI 规范数字口径） */
+.user-balance-option {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 退出登录与上方两项（余额/换头像）之间加分隔线 */
+.user-logout-option {
+  margin-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+
 .user-name {
-  max-width: 120px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: var(--font-medium);
 }
 
 .user-arrow {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 </style>

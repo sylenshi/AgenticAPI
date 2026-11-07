@@ -281,6 +281,7 @@ if await channel_crud.get_id_by_name(db, channel_name):
 | POST   | `/user/guest`    | 公开  | 访客模式：创建临时访客账号（随机用户名密码，`isGuest=true`）并签发 24 小时令牌；顺带惰性清理已过期的访客账号    |
 | GET    | `/user/info`     | 需登录 | 获取当前登录用户信息（含余额、分组、注册/登录时间等）                                        |
 | PUT    | `/user/profile`  | 需登录 | 修改自己的资料（昵称/手机号，空字符串视为清空），返回更新后的用户信息                                |
+| PUT    | `/user/avatar`   | 需登录 | 切换头像：从预设 6 张中随机换一张（保证与当前不同），无请求体，返回更新后的用户信息                        |
 | DELETE | `/user/logout`   | 需登录 | 登出，删除服务端令牌（立即失效）                                                   |
 
 `userInfo` 结构（不含密码等敏感字段；`balance` / `usedQuota` 为 DECIMAL 字符串）：
@@ -291,6 +292,7 @@ if await channel_crud.get_id_by_name(db, channel_name):
   "username": "zcode_tester",
   "nickname": null,
   "phone": null,
+  "avatar": "/avatars/avatar-3.png",
   "isGuest": false,
   "isAdmin": false,
   "balance": "1.000000",
@@ -303,6 +305,8 @@ if await channel_crud.get_id_by_name(db, channel_name):
 
 - **注册策略（站点可配）**：正式注册的初始余额（`registerInitialBalance`）与默认分组（`registerUserGroup`，free / vip，默认 vip）
   由管理员在控制台-设置页调整（`/admin/settings`），仅对之后新创建的账号生效；访客固定 free 分组、初始余额独立配置（`guestInitialBalance`，建议 0）。
+- **头像（v0.15.0）**：预设 6 张头像由前端静态托管（`/avatars/avatar-N.png`，压缩后约 100KB），后端只存 URL 不做上传；
+  注册 / 访客创建时随机抽一张作初始头像，`PUT /user/avatar` 随机切换一张且保证与当前不同；`avatar` 为 null 时前端回退显示用户名首字符圆标（存量老账号兼容）。
 - **余额与免费模型**：`/v1` 调用前校验余额 ≤ 0 则拒绝（402）；**全零定价的免费模型豁免余额校验**（不产生扣费，0 余额账号也可调用）；
   付费模型在余额不足时返回 402 `账户余额不足，请联系管理员充值`。
 - 注册错误：用户名已存在 → 400；字段长度不符 → 422。
