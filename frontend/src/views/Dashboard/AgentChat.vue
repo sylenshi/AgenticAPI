@@ -9,14 +9,22 @@
             <h3>{{ agentStore.currentSession.title }}</h3>
             <span class="chat-model-tag">{{ agentStore.currentModel }}</span>
           </div>
-          <a-select :model-value="agentStore.currentModel" size="small"
-                    :style="{width: '280px'}" placeholder="切换驱动模型（下一轮生效）"
-                    :disabled="busy"
-                    @change="(v: any) => agentStore.patchSession({modelName: String(v)})">
-            <a-option v-for="m in availableModels" :key="m.name" :value="m.name">
-              {{ m.name }}
-            </a-option>
-          </a-select>
+          <div class="chat-header-actions">
+            <a-tooltip content="导出当前会话记录（Markdown，含工具调用与审批轨迹），任务执行中也可导出">
+              <a-button type="outline" size="small" :loading="exporting" @click="exportSession">
+                <template #icon><icon-download/></template>
+                导出会话
+              </a-button>
+            </a-tooltip>
+            <a-select :model-value="agentStore.currentModel" size="small"
+                      :style="{width: '280px'}" placeholder="切换驱动模型（下一轮生效）"
+                      :disabled="busy"
+                      @change="(v: any) => agentStore.patchSession({modelName: String(v)})">
+              <a-option v-for="m in availableModels" :key="m.name" :value="m.name">
+                {{ m.name }}
+              </a-option>
+            </a-select>
+          </div>
         </header>
 
         <!-- 有会话但还没有消息：给引导空态，会话区不再整块留白 -->
@@ -57,13 +65,6 @@
             <template #icon><icon-plus/></template>
             新建会话
           </a-button>
-          <a-tooltip content="导出当前会话记录（Markdown，含工具调用与审批轨迹）">
-            <a-button type="outline" size="small" :loading="exporting"
-                      :disabled="!agentStore.currentSessionId" @click="exportSession">
-              <template #icon><icon-download/></template>
-              导出
-            </a-button>
-          </a-tooltip>
           <a-button type="outline" size="small" status="danger" @click="confirmClear">
             <template #icon><icon-delete/></template>
             清空
@@ -424,6 +425,14 @@ async function exportSession() {
   gap: var(--space-3);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--color-border);
+}
+
+/* 头部右侧操作区：导出会话 + 模型选择器（导出不随任务占用禁用，执行中恰是排查导出场景） */
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .chat-title {
