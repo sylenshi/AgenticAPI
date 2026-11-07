@@ -190,9 +190,10 @@ async def clean_expired_guests(db: AsyncSession) -> int:
 
 async def _delete_user_agent_data(db: AsyncSession, user_ids: list[int]) -> None:
     """连带删除用户的维护 Agent 会话与消息（会话删用户后成孤儿且无审计价值，防持续累积）"""
-    session_ids = await db.scalars(
+    result = await db.execute(
         select(AgentSessionTable.id).where(AgentSessionTable.user_id.in_(user_ids))
-    ).all()
+    )
+    session_ids = result.scalars().all()
     if session_ids:
         # 先删消息再删会话（agent_message.session_id 有外键约束）
         await db.execute(delete(AgentMessageTable).where(AgentMessageTable.session_id.in_(session_ids)))
