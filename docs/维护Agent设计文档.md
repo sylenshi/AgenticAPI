@@ -1,6 +1,6 @@
 # AgenticAPI 站点维护 Agent · 设计文档
 
-> 适用系统版本：**v0.11.0** ｜ 文档版本：v2.1 ｜ 日期：2026-11-07 ｜ 机制均已与代码核对
+> 适用系统版本：**v0.12.0** ｜ 文档版本：v2.2 ｜ 日期：2026-11-07 ｜ 机制均已与代码核对
 >
 > 工具 / Skill 明细见**附录 A / B**；改代码先看第 7 章代码地图；历史演进见 [`changelog/维护Agent版本演进.md`](changelog/维护Agent版本演进.md)。本文只描述当前状态。
 
@@ -16,7 +16,7 @@
 |---|---|
 | 大脑可插拔 | 驱动模型为站内任意已启用模型，走中转链路天然享受渠道轮询容错，前端随时切换 |
 | 手是白名单 + 一个受控沙箱 | 23 个封闭注册工具；宿主机无 shell、无任意命令、无通用文件访问；唯一长尾出口 `sandbox_exec` 在隔离容器内执行 |
-| 高危有阀门 | 写操作按会话审批三档位决定弹卡范围；L2 删除类另有 dry-run 两段式第二道闸；L2 每会话 5 次上限任何档位恒生效 |
+| 高危有阀门 | 写操作按会话审批三档位决定弹卡范围；删除类另有 dry-run 两段式第二道闸；删除类与沙箱带按工具声明的会话配额，任何档位恒生效 |
 | 全程留痕 | 会话消息（含工具与审批轨迹）服务端持久化，工具执行另写 `logs` 审计 |
 
 ### 1.2 能力地图
@@ -51,12 +51,13 @@
 
 | 术语 | 含义 |
 |---|---|
-| L0 / L1 / L2 | 工具风险等级：只读 / 低危写 / 高危写（不可逆删除），见 4.2 |
-| 审批三档位 | 会话级设置 `confirm_all` / `confirm_critical` / `full`，决定写操作弹卡范围，见 4.2 |
-| always_confirm（强审） | 工具级标记：`confirm_critical` 档下仍强制弹卡 |
+| L0 / L1 / L2 | 工具风险等级：只读 / 可逆写 / 关键写（不可逆删除、任意命令执行、影响计费流量的创建），见 4.2 |
+| 审批三档位 | 会话级设置 `confirm_all` / `confirm_critical` / `full`，与风险等级查表决定弹卡范围，见 4.2 |
+| 会话配额 | 按工具声明的每会话执行上限（删除类 10、沙箱 30），任何档位恒生效的护栏，见 4.3 |
 | 两段式（dry-run） | L2 删除工具分两次调用：先 `dry_run=true` 出影响预览，管理员确认后再真删 |
+| 单次任务 | 一条用户消息触发的完整工具循环；轮数与成本护栏均按任务计，任务小结后可一键继续 |
 | 脱水（dehydrate） | 把窗口外的长工具结果替换为占位摘要，见 3.3 |
-| 压缩（compact） | 脱水后仍超窗时，把早期历史折成一条摘要消息，见 3.3 |
+| 压缩（compact） | 脱水后仍超窗时，沿 user 边界把最旧历史轮次整轮折成一条摘要消息，见 3.3 |
 | 上下文水位 | 当前上下文真实占用 / 模型窗口上限，前端进度条可视化，见 3.3 |
 | Skill | 按 frontmatter 元数据索引、按需全文加载的运维 SOP（Markdown） |
 
@@ -91,31 +92,34 @@ flowchart LR
 | ① queue | 消费新消息与执行期间的插话，合并为 user 消息 |
 | ② prepare | 请求装配（唯一转换边界）：读会话当前模型、审批档位与窗口 → 脱水检查 → 注入 system prompt（角色 + 安全规则 + 工具目录 + skill 目录）与 tools 白名单 |
 | ③ execute | 流式调用模型（SSE 透传给前端）；收到 tool_calls 则走工具执行器，结果以 role:tool 回传进入下一轮 |
-| ④ settle | 本轮 usage 计账、消息落库；检查轮次 / token 预算 / L2 次数，决定继续或 `[DONE]` 收尾 |
+| ④ settle | 本轮 usage 与成本计账、消息落库；检查轮次 / 任务成本护栏，决定继续、注入收敛提示或 `task_paused` 收尾 |
 
 ### 2.3 端到端示例：删除一个渠道
 
 最复杂路径（L2 两段式 + 审批）的全链路：
 
-> 管理员："删掉 unused-channel" → 模型发起 `delete_channel(dry_run=true)` → 按审批档位弹卡（展示孤儿引用预览 + 300s 倒计时，超时自动拒绝）→ 批准后 dry-run 返回影响预览 → 模型提示"该渠道被 2 个模型绑定，建议先解绑，确认删除吗" → 管理员确认 → `delete_channel(dry_run=false)` 再次弹卡 → 批准后真删，L2 计数 1/5、双轨审计落库 → 模型总结收尾。
+> 管理员："删掉 unused-channel" → 模型发起 `delete_channel(dry_run=true)` → 按审批档位弹卡（展示孤儿引用预览 + 300s 倒计时，超时自动拒绝）→ 批准后 dry-run 返回影响预览 → 模型提示"该渠道被 2 个模型绑定，建议先解绑，确认删除吗" → 管理员确认 → `delete_channel(dry_run=false)` 再次弹卡 → 批准后真删，会话配额计数 1/10、双轨审计落库 → 模型总结收尾。
 
 ### 2.4 护栏与防御
 
+护栏均按**单次任务**计（一条用户消息触发的完整工具循环；任务小结收尾后可一键继续，配额重新计算）：
+
 | 护栏 | 值 | 说明 |
 |---|---|---|
-| 单次工具循环轮数 | 24 | 超出后注入提示，要求模型基于已有信息总结收尾 |
-| 单工具超时 | 默认 30s | 拨测 / 巡检 / 搜索类自声明更长（40–300s）；超时以 isError 回传模型 |
-| 会话 token 预算 | 200k（会话可调） | 超预算 Agent 汇报后停止 |
-| L2 每会话执行上限 | 5 次 | 任何审批档位恒生效（属护栏非审批）；超出拒绝并提示走管理页 |
+| 单次任务工具循环轮数 | 40 | 距上限 5 轮起注入软提示要求收敛（软着陆）；超出后要求模型输出"已完成 / 未完成 / 续作建议"三段式小结并停止 |
+| 单次任务成本上限 | 默认 ¥2（设置页可调） | 按每轮真实计费口径累计（`compute_cost`），超限与轮数同样三段式小结收尾；前端收到 `task_paused` 事件后展示"继续任务"一键续跑 |
+| 单工具超时 | 默认 30s | 拨测 / 巡检 / 搜索类自声明更长（40–480s）；超时以 isError 回传模型 |
+| 工具会话配额 | 删除类 10 次 / 沙箱 30 次 | 按工具声明（`session_limit`），任何审批档位恒生效（属护栏非审批）；超出拒绝并提示走管理页 |
 | 审批等待超时 | 300s | 超时自动拒绝（result=timeout），结果以 isError 回传模型 |
 | 批测并发 | 信号量限 5 | `test_channel` / `test_all_models` / 健康报告巡检共用约束 |
 
 防御机制：
 
+- **续轮韧性**：每轮请求优先复用上一轮渠道（网络异常同渠道重试一次），仍失败按轮询顺序遍历其余渠道（failover），全部渠道失败才终止——长任务不再因单渠道一次抖动中断（首轮与续轮统一走 `_open_round`）；
 - **截断防御**：`finish_reason == "length"`（输出被截断）时，本轮全部 tool_calls 判失败不执行——防残缺参数触发危险操作；
 - **Error as Data**：任何失败（参数错、超时、上游 5xx、审批被拒）不中断 SSE、不抛异常，统一包装 `{isError: true, message}` 回传模型，由模型自我修正或向管理员求助；仅会话级致命错误（数据库失联）走 SSE error 收尾；
 - **断链修复**：进程中断造成的 tool 消息缺失（续轮会被上游 400 拒绝），加载会话时自动补插 isError 占位；
-- **降级剥 tools**：上游返回 400/422（模型不支持 function calling）时，自动剥掉 tools 降级为纯对话重试并提示。
+- **降级剥 tools**：上游返回 400/422（模型不支持 function calling）时，自动剥掉 tools 降级为纯对话重试并提示（首轮与续轮同样适用）。
 
 ---
 
@@ -142,7 +146,7 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 运维会话历史短，压力主要来自**工具结果**（巡检报告、日志明细）。两级策略，均在每轮 prepare 阶段执行：
 
 1. **脱水（主策略）**：最近 12 条消息窗口之外、长度超过 600 字符的 tool 结果，替换为"[工具结果已折叠] + 摘要"占位；只缩内容不删消息，tool_call / tool_result 配对完整保留；
-2. **压缩（兜底）**：token 估算（最近一轮官方 prompt_tokens + 其后新增字符数 ÷ 4）超过模型窗口 70% 时触发：保留 system + 最近消息（切点对齐 user 消息边界，不拆散工具配对），更早历史折成**一条代码生成的摘要消息**（不追加模型调用，避免压缩失败拖死主任务）。
+2. **压缩（兜底）**：token 估算（最近一轮官方 prompt_tokens + 其后新增字符数 ÷ 4）超过模型窗口 70% 时触发：沿 user 消息边界从最旧开始**整轮折叠**（切点永远不拆散工具配对），直到估算降到窗口 60% 以下或只剩最后一个 user 轮不可再折；折叠历史折成**一条代码生成的摘要消息**（不追加模型调用，避免压缩失败拖死主任务）。
 
 **水位可视化**：右栏进度条展示 已用 / 上限（模型 `context_length`）。已用 = `round_end` 的 `contextTokens`（最近一轮官方 `prompt_tokens`，当前上下文真实占用；**不是**累计 `usageSoFar`——含已脱水历史会虚高）；切会话从历史最后一条 assistant 消息恢复；≥70% 橙（即压缩线）、≥90% 红。
 
@@ -158,32 +162,33 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 ```
 解析 tool_calls → 截断防御 → 参数 Schema 校验（失败回传可行动原因）
-  → 风险阀门（L2 次数检查 → L0 直行 / L1·L2 按会话审批档位）→ 执行
+  → 风险阀门（会话配额检查 → 档位 × 等级查表：L0 直行 / L1·L2 按会话审批档位）→ 执行
   → 结果脱敏 redact() → 截断（≤8KB，摘要式：列表保留前 3 后 2 条 + 计数）
-  → role:tool 回传 + agent_message 落库 + logs 审计 + SSE 事件
+  → role:tool 回传（落库带 tool_name）+ agent_message 落库 + logs 审计 + SSE 事件
 ```
 
 ### 4.2 风险分级与审批三档位
 
+风险等级是工具的自身属性，弹卡行为由"档位 × 等级"一张查表唯一决定（`_need_approval`），无任何例外名单：
+
 | 级别 | 定义 | 数量 | 工具 |
 |---|---|---|---|
 | L0 | 只读 / 无副作用 | 14 | 查询、拨测、统计、巡检、联网搜索等（见附录 A） |
-| L1 | 低危写 | 7 | `update_channel` / `update_model` + 强审 5 个（`create_channel` / `create_model` / `save_skill` / `delete_skill` / `sandbox_exec`） |
-| L2 | 高危写：不可逆删除 | 2 | `delete_channel` / `delete_model`（两段式 dry-run） |
+| L1 | 可逆写 | 3 | `update_channel` / `update_model` / `save_skill`（同名覆盖即恢复，落盘前过 redact） |
+| L2 | 关键写：不可逆删除 / 任意命令执行 / 影响计费流量的创建 | 6 | `delete_channel` / `delete_model` / `delete_skill`（前两者两段式 dry-run）、`create_channel` / `create_model`（直接决定计费与流量）、`sandbox_exec` |
 
-会话审批档位（`agent_session.approval_mode`，右栏下拉切换）决定 L1/L2 是否弹卡：
+会话审批档位（`agent_session.approval_mode`，右栏下拉切换）× 风险等级的完整矩阵：
 
-| 档位 | 值 | 弹卡范围 |
-|---|---|---|
-| 需要审批（默认） | `confirm_all` | 所有 L1/L2 写操作（含沙箱命令） |
-| 部分审批 | `confirm_critical` | 仅 L2 高危 + always_confirm 强审名单，其余 L1 直行 |
-| 完全权限 | `full` | 全部直行不弹卡；**L2 每会话 5 次上限仍然生效** |
+| 档位 | 值 | L0 只读 | L1 可逆写 | L2 关键写 |
+|---|---|---|---|---|
+| 需要审批（默认） | `confirm_all` | 直行 | 弹卡 | 弹卡 |
+| 部分审批 | `confirm_critical` | 直行 | 直行 | 弹卡 |
+| 完全权限 | `full` | 直行 | 直行 | 直行 |
 
 ### 4.3 恒定不变量与实现要点
 
-- **L2 两段式**是工具内部逻辑，与档位无关：首次 `dry_run=true` 出影响预览，管理员批准后第二次 `dry_run=false` 才真执行；
-- **L2 每会话 5 次**任何档位（含 full）恒生效——属护栏非审批；
-- **强审名单不受部分审批豁免**：`confirm_critical` 档下 always_confirm 工具仍弹卡；
+- **会话配额**（删除类每会话 10 次、沙箱每会话 30 次）任何档位（含 full）恒生效——属护栏非审批；配额按 `agent_message.tool_name` 计数（成功口径），`tool_name` 列上线前的旧 L2 记录无法区分归属，保守同时计入两个删除工具的配额；
+- **L2 删除类两段式**是工具内部逻辑，与档位无关：首次 `dry_run=true` 出影响预览，管理员批准后第二次 `dry_run=false` 才真执行；
 - **旧开关兼容**：`auto_approve_l1` / `enable_l2` 保留不再写入，`approval_mode` 为空时由旧值推导（`auto_approve_l1=true → confirm_critical`，否则 `confirm_all`）；已有库需手动 ALTER 加列（见 deploy.md）；
 - **实现**：审批状态内存 Event 挂起 + 同步落库（`agent_message.approval_status`）；等待 300s 超时自动拒绝，服务重启后的 pending 在下次加载会话时统一改判 timeout；**阀门是代码强制路径**（流水线中判定、先于 handler），与模型是否"听话"无关。
 
@@ -194,7 +199,7 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 3. **鉴权**：`/maintain-agent/*` 全部 `get_current_admin`；approve 校验审批归属当前管理员；
 4. **审计**：工具执行、审批变迁、模型切换全落库（双轨，见 6.2）；
 5. **数据库安全**：数据治理走沙箱内 pymysql 脚本（data-governance 技能 SOP）：先 COUNT 预览再分批 DELETE（每批 5000 行 + 批间休止），禁 TRUNCATE / DROP / ALTER；DELETE 仅限 logs / chat_record / usage_stats 三表，凭证列（`llm_channels.api_key` / `user.password`）禁查，SELECT 显式列名不用 `SELECT *`；
-6. **资源护栏**：轮次 / 单工具超时 / token 预算 / L2 次数四重上限（见 2.4）；批测并发限 5；
+6. **资源护栏**：任务轮数 / 单工具超时 / 任务成本上限 / 工具会话配额多重上限（见 2.4）；批测并发限 5；
 7. **截断防御**：模型输出被截断时其工具调用一律拒绝执行（见 2.4）。
 
 ---
@@ -212,7 +217,7 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 管理员可让 Agent 把现场总结的经验固化为新 skill（`save_skill` / `delete_skill` / `list_skills`）。安全约束：
 
-- 写操作 always_confirm 强制全文审批；落盘前过 `redact()`；
+- 审批卡展示完整草稿全文（保存与删除是否弹卡由会话审批档位决定，删除另有会话配额）；落盘前过 `redact()`；
 - name 强制 slug 校验（小写字母 / 数字 / 连字符）防路径穿越；
 - 单文件 ≤32KB；仅可写 `data/agent_skills/` 单目录，内置 skill 物理隔离不可覆盖；
 - 保存 / 删除各写一条 admin 日志。
@@ -228,12 +233,12 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 | 驱动 | docker CLI 子进程（零新依赖，Windows 与 Linux 行为一致）；`SANDBOX_DOCKER_CMD` 可配 `sudo -n docker` |
 | 隔离加固 | 独立网桥、非 root（uid 1000）、`--cap-drop ALL` + `no-new-privileges`、只读 rootfs + tmpfs（/tmp 64MB、/workspace 256MB）、内存 512MB / CPU 1 / pids 256；不挂载宿主路径与 .env，不注入渠道密钥 |
 | 执行语义 | 命令经容器内 `timeout` 包裹（默认上限 120s）；输出流式经 `sandbox_output` 事件推前端（节流 + 累计 64KB 保尾部）；最终结果过 `redact()` + 8KB 截断（stdout 保尾 6000 / stderr 2000 字符，报错结论通常在末尾） |
-| 审批 | L1 + always_confirm：卡片展示完整命令；是否弹卡由会话审批档位决定，不占 L2 配额 |
+| 审批 | L2：卡片展示完整命令；是否弹卡由会话审批档位决定（`confirm_all` / `confirm_critical` 弹卡、`full` 直行）；每会话 30 次配额任何档位恒生效（data-governance 一次治理约消耗 2–4 次调用） |
 | 配置 | `SANDBOX_*` 共 12 项全部可选有默认值（见 `backend/.env.example`） |
 
 `sandbox_status`（L0）查询 Docker 可用性 / 镜像就绪 / 容器状态 / 空闲时长——沙箱不可用时先用它排障。
 
-**残余风险**：沙箱可访问公网任意地址（功能需求本身）；MySQL 桥接开启后沙箱持库凭证（docker env 注入，同宿主 .env 暴露面，可为沙箱单独建最小权限账号）；容器与宿主共享内核（非 VM）；`full` 档下沙箱命令不弹卡，管理员应在了解风险后再开启。
+**残余风险**：沙箱可访问公网任意地址（功能需求本身）；MySQL 桥接开启后沙箱持库凭证（docker env 注入，同宿主 .env 暴露面，可为沙箱单独建最小权限账号）；容器与宿主共享内核（非 VM）；`full` 档下沙箱命令不弹卡（仅剩每会话 30 次配额约束），管理员应在了解风险后再开启。
 
 ### 5.4 沙箱 MySQL 桥接（可选）
 
@@ -258,9 +263,9 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 ### 6.1 页面与 SSE 协议
 
-三栏布局：会话侧栏（新建 / 清空 / 删除）+ 对话窗口（消息流、工具状态条、审批卡、沙箱折叠控制台、输入框 + 停止按钮，头部含模型选择器）+ 右栏（**审批档位下拉**、**上下文水位进度条**、风险等级图例、帮助弹窗）。实现复用工坊组件：消息列表 `ChatMessages.vue`、输入框 `AgentInput.vue`、SSE 解析骨架泛化出 `agenticapi_agent` 事件分发；审批批准 / 拒绝调 `POST /maintain-agent/approve`；水位上限取模型列表 store 的 `contextLength`，已用取 `round_end.contextTokens`。
+三栏布局：会话侧栏（新建 / 清空 / 删除）+ 对话窗口（消息流、工具状态条、审批卡、沙箱折叠控制台、输入框 + 停止按钮，头部含模型选择器；护栏叫停后输入框上方出现**继续任务**按钮）+ 右栏（**审批档位下拉**、**上下文水位进度条**、帮助弹窗；内部分级编码 L0/L1/L2 不外露，审批卡标签翻译为"写操作 / 高危操作"）。实现复用工坊组件：消息列表 `ChatMessages.vue`、输入框 `AgentInput.vue`、SSE 解析骨架泛化出 `agenticapi_agent` 事件分发；审批批准 / 拒绝调 `POST /maintain-agent/approve`；水位上限取模型列表 store 的 `contextLength`，已用取 `round_end.contextTokens`。
 
-正文走 OpenAI 风格增量（`choices[0].delta.content / reasoning_content`），站内扩展统一挂 `agenticapi_agent` 字段。事件全集（7 个）：
+正文走 OpenAI 风格增量（`choices[0].delta.content / reasoning_content`），站内扩展统一挂 `agenticapi_agent` 字段。事件全集（8 个）：
 
 | 事件 | 载荷 | 前端渲染 |
 |---|---|---|
@@ -271,12 +276,13 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 | `confirm_resolved` | `{approvalId, result}` | 卡片置灰标注结果（approved / rejected / timeout） |
 | `round_end` | `{round, usageSoFar, contextTokens}` | 用量脚注 + 右栏上下文水位更新 |
 | `sandbox_output` | `{tool, chunk}` | 沙箱实时输出（折叠控制台，超长保尾部） |
+| `task_paused` | `{reason: round_limit/cost_limit, round}` | 流结束后在输入框上方展示"继续任务"一键续跑（Agent 已输出三段式小结） |
 
 模型切换不发事件（下一轮静默生效）；脱水占位是消息正文里的折叠文本，不是独立事件。会话级致命错误返回 `data: {"error": {…}}` + `[DONE]` 收尾；401 复用前端现有拦截逻辑。
 
 ### 6.2 持久化与会话保留
 
-- **`agent_session`**：会话（所属用户、标题、当前模型、审批档位 `approval_mode`、状态）；**`agent_message`**：全轨迹消息（role / content / tool_calls / 风险等级 / 审批状态 / token 用量）。完整字段见[数据库设计文档](数据库设计文档.md) 5.12 / 5.13 节，启动自动建表；
+- **`agent_session`**：会话（所属用户、标题、当前模型、审批档位 `approval_mode`、状态）；**`agent_message`**：全轨迹消息（role / content / tool_calls / 工具名 / 风险等级 / 审批状态 / token 用量）。完整字段见[数据库设计文档](数据库设计文档.md) 5.12 / 5.13 节，启动自动建表（`tool_name` 列为 v0.12.0 新增，已有库需手动 DDL）；
 - **落库的是 redact() 之后的版本**，库里不存密钥原文；审计双轨：`agent_message`（会话视角完整轨迹）+ `logs`（type=admin 全站审计流，含审批变迁、工具执行明细）；
 - **保留策略**：每用户最多保留最近 50 个、仅保留近 30 天创建的会话；新建会话时后台惰性清理（联动删消息、写 admin 日志），不引入定时任务；会话自动起标题复用现有逻辑。
 
@@ -288,8 +294,8 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 | 位置 | 职责 |
 |---|---|
-| `app/services/agent/maintain_loop.py` | 四阶段主循环 + 脱水 / 压缩 + SSE 事件总线（round_end 带 contextTokens 水位） |
-| `app/services/agent/registry.py` | 工具注册表 + 执行器流水线（校验 / 三档位阀门 / L2 限次 / 截断 / 审计） |
+| `app/services/agent/maintain_loop.py` | 四阶段主循环 + 脱水 / 压缩 + SSE 事件总线（round_end 水位 / task_paused 断点续跑 / 续轮渠道 failover） |
+| `app/services/agent/registry.py` | 工具注册表 + 执行器流水线（校验 / 档位×等级查表阀门 / 会话配额 / 截断 / 审计） |
 | `app/services/agent/tools/` | 按域分文件的工具 handler（channel / usage / model / ops / skill / sandbox / web）；`data_tools.py` 仅存巡检用的 `_table_stats` 内部函数 |
 | `app/services/agent/{skills,approvals,redact}.py` | skill 加载器、审批管理器、脱敏过滤器 |
 | `app/services/{probe_service,sandbox_service}.py` | 拨测、容器沙箱（含可选 MySQL 桥接） |
@@ -304,13 +310,13 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 1. 每个工具在真实站点数据上实测通过，返回 JSON 过脱敏过滤器；
 2. L0 结果 ≤8KB（超出自动摘要化）；
-3. L2 全程留痕：审批记录 + dry-run 预览 + 实删行数 + admin 日志四者可在库中对齐；
+3. L2 删除类全程留痕：审批记录 + dry-run 预览 + 实删行数 + admin 日志四者可在库中对齐；
 4. 所有端点未登录 401、非管理员 403；
 5. 巡检报告在 ≥10 模型 / ≥5 渠道规模下一分钟级生成（批测并发受控）；
-6. 模型切换后同会话可继续执行工具任务，上下文不丢不超窗；
-7. 计费可对账（logs cost 如实）；超限会话在下次新建时被清理且留日志；
+6. 模型切换后同会话可继续执行工具任务，上下文不丢不超窗；续轮单渠道故障自动 failover 到下一渠道；
+7. 计费可对账（logs cost 如实）；任务成本达到上限后三段式小结收尾、前端出现"继续任务"，续跑后轮数与成本重新计算；超限会话在下次新建时被清理且留日志；
 8. skill 教学保存安全链路：非法 name 被拒、redact 后落盘、超限拒绝；
-9. 三档位行为正确：`confirm_all` 全弹卡 / `confirm_critical` 仅 L2+强审+沙箱 / `full` 全直行且 L2 上限仍生效；
+9. 三档位行为正确（档位 × 等级查表）：`confirm_all` 写操作全弹卡 / `confirm_critical` 仅 L2 弹卡 / `full` 全直行；删除类 10 次、沙箱 30 次会话配额任何档位恒生效；
 10. 沙箱 MySQL 桥接开启后，data-governance 脚本可统计真实行数且输出无明文凭证；关闭时沙箱与数据库隔离。
 
 开放问题：模型"支持工具调用"名单目前用内置名单 + 运行时降级探测，后续可考虑给 `llm_models` 加 `supports_tools` 布尔列（需手动 DDL）。
@@ -319,7 +325,7 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 
 ## 附录 A：工具完整清单（23 个）
 
-> 与代码逐一核对（`app/services/agent/tools/*.py` 注册语句）。参数以注册表 schema 为准。风险分布：**L0 只读 ×14 ｜ L1 写 ×7（其中 always_confirm 强审 ×5）｜ L2 两段式 ×2**。
+> 与代码逐一核对（`app/services/agent/tools/*.py` 注册语句）。参数以注册表 schema 为准。风险分布：**L0 只读 ×14 ｜ L1 可逆写 ×3 ｜ L2 关键写 ×6（删除类每会话配额 10 次、沙箱 30 次）**。
 
 ### A. 渠道管理（6）
 
@@ -329,8 +335,8 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 | `test_channel` | L0 | 渠道连通拨测：单模型抽查或全模型遍历（并发限 5），直发上游免计费 | 180s |
 | `check_binding_consistency` | L0 | 渠道-模型双向软引用交叉比对，输出不一致清单与修复建议，只报告不修复 | 30s |
 | `update_channel` | L1 | 启停 / 超时 / 描述 / 支持模型；审批卡展示字段级 diff；**不改密钥**（走管理页） | 30s |
-| `create_channel` | L1·强审 | 新上游接入；密钥仅入参→落库瞬时存在，审批卡只显尾 4 位 | 30s |
-| `delete_channel` | L2·两段式 | dry-run 预览反向绑定影响（孤儿引用），确认后真删 | 30s |
+| `create_channel` | L2 | 新上游接入；密钥仅入参→落库瞬时存在，审批卡只显尾 4 位 | 30s |
+| `delete_channel` | L2·两段式·配额10 | dry-run 预览反向绑定影响（孤儿引用），确认后真删 | 30s |
 
 ### B. 上游用量与凭证（1）
 
@@ -345,9 +351,9 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 | `get_model_info` | L0 | 定价 / 分组 / 渠道绑定（含映射）/ 状态 / 窗口，可单查或全量 | 30s |
 | `test_model` | L0 | 单模型拨测，按绑定渠道顺序逐个直发探测（免计费），返回每渠道结论 | 120s |
 | `test_all_models` | L0 | 全量启用模型巡检（并发限 5、进度实时上报），汇总可用率 + 失败清单 | 300s |
-| `create_model` | L1·强审 | 新增出站模型，含定价四件与渠道绑定；定价决定计费，审批卡展示完整配置 | 30s |
+| `create_model` | L2 | 新增出站模型，含定价四件与渠道绑定；定价决定计费，审批卡展示完整配置 | 30s |
 | `update_model` | L1 | 字段级 diff 预览；模型名不可改；可解绑 / 改绑渠道 | 30s |
-| `delete_model` | L2·两段式 | dry-run 展示渠道侧孤儿声明影响，确认后真删 | 30s |
+| `delete_model` | L2·两段式·配额10 | dry-run 展示渠道侧孤儿声明影响，确认后真删 | 30s |
 
 ### D. 运营速查与巡检（3）
 
@@ -363,14 +369,14 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 |---|---|---|---|
 | `load_skill` | L0 | 按需读取指定 Skill 的完整 SOP 正文（目录常驻、全文按需，省上下文） | 30s |
 | `list_skills` | L0 | 列出技能池全部条目（内置 / 自定义、描述、触发词、更新时间） | 30s |
-| `save_skill` | L1·强审 | 把运维经验固化为自定义 Skill；slug 校验、≤32KB、落盘前过 redact | 30s |
-| `delete_skill` | L1·强审 | 删除指定自定义 Skill（内置不可删） | 30s |
+| `save_skill` | L1 | 把运维经验固化为自定义 Skill（同名覆盖即恢复）；slug 校验、≤32KB、落盘前过 redact | 30s |
+| `delete_skill` | L2·配额10 | 删除指定自定义 Skill，不可恢复（内置不可删） | 30s |
 
 ### F. 容器沙箱（2）
 
 | 工具 | 等级 | 说明 | 超时 |
 |---|---|---|---|
-| `sandbox_exec` | L1·强审 | 隔离容器内执行任意命令（curl / jq / python3+httpx/pymysql，可出公网、可连站内 MySQL），弹卡与否由审批档位决定（设计见 5.3） | 30s* |
+| `sandbox_exec` | L2·配额30 | 隔离容器内执行任意命令（curl / jq / python3+httpx/pymysql，可出公网、可连站内 MySQL），弹卡与否由审批档位决定（设计见 5.3） | 30s* |
 | `sandbox_status` | L0 | 查询 Docker 可用性 / 镜像就绪 / 容器状态 / 空闲时长 | 60s |
 
 > \* `sandbox_exec` 的 30s 是工具级超时；命令本身另有容器内 `timeout` 包裹（默认上限 120s，可配），长命令由沙箱侧控制。
@@ -406,15 +412,18 @@ Agent 大脑**不走独立 LLM SDK，而走本站中转链路**（`relay_service
 |---|---|---|
 | 1 | Agent 大脑调用走管理员个人消费，完全复用中转计费链路，不做豁免 | 复用已有链路优先；计费可对账，避免维护两套口径 |
 | 2 | 会话保留：每用户最近 50 个 + 近 30 天，新建时惰性清理，不做定时任务 | 不引入 cron 依赖；先例是访客账号清理；不设"自查自清理"工具 |
-| 3 | 开放 skills 教学保存（save/delete/list），带 always_confirm 等安全约束 | 让现场经验可沉淀复用；写操作强审 + redact + slug 校验兜住风险 |
+| 3 | 开放 skills 教学保存（save/delete/list），带全文审批卡 + redact + slug 校验等安全约束 | 让现场经验可沉淀复用；保存展示完整草稿、删除归类关键写（L2）兜住风险 |
 | 4 | 不做定时巡检，巡检仅管理员对话触发 | 巡检消耗真实拨测资源，频度应由人决定 |
 | 5 | 引入审批式容器沙箱，红线修订为"无宿主机 shell；容器命令按审批档位管控"；全站共享单容器 + 懒启动 + 空闲自停 | 封闭白名单盖不住长尾场景；单容器 + 自停控制资源占用 |
 | 6 | 开放渠道 / 模型 CRUD（L1 强审 / L2 两段式）；用户与余额仍不可由 Agent 操作 | 新上游上线是高频诉求；资金与权限敏感操作留在管理页 |
 | 7 | 新增 web_search 只读工具，复用 StepSearch 通道 | 排障常需查上游公告 / 定价；复用现有通道零新依赖 |
 | 8 | tool_calls 参数落库 / 回显 / 审批卡全部使用脱敏版，执行用原文 | 密钥闭环三处同源（上下文 / 前端 / 库），不留第二套过滤器 |
 | 9 | 工具面收敛为 23 个封闭白名单 | 每轮常驻 schema token 开销随工具数线性上涨；工具越多误选率越高；脱敏 / 审批 / 测试 / 文档维护成本同涨 |
-| 10 | 审批分级收敛为三档位；L2 每会话 5 次上限任何档位保留 | 原多开关组合规则理解门槛高；档位一次说清"哪些弹卡"；次数上限是护栏不是审批，不可被档位豁免 |
+| 10 | 审批分级收敛为三档位；高风险工具按工具声明会话配额（删除类 10 次、沙箱 30 次）任何档位保留 | 原多开关组合规则理解门槛高；档位一次说清"哪些弹卡"；次数上限是护栏不是审批，不可被档位豁免；删除类从 5 放宽到 10（每次真删前有人工审批卡，5 次撑不住批量清理场景） |
 | 11 | 沙箱可选桥接站内 MySQL；大数据导出不做 | 数据治理脚本需要连库；stdout 64KB 上限决定了大文件走服务器 mysqldump 更可靠 |
+| 12 | 护栏以"任务成本上限"（system_config 可调）替代累计 token 预算；轮数 24→40 且末段软提示 | prompt token 每轮重复携带完整上下文，累计 token 随轮数近平方增长，预算必然先于轮数触发且口径与计费脱节；成本才是真正要保护的资源，与计费天然对齐；软提示软着陆替代硬腰斩，叫停后 task_paused + 前端一键续跑 |
+| 13 | 删除工具级 always_confirm 标记：原强审 5 工具按行为等价原则并入等级（create_channel/create_model/delete_skill/sandbox_exec → L2，save_skill → L1），执行上限改为按工具声明的 session_limit | always_confirm 实质是横切在等级之上的隐藏"L1.5"，三档行为与 L2 完全一致；等级 × 档位一张查表后无任何例外名单，体系从 4 个维度收敛为 2 个维度 + 1 个数据化配额列 |
+| 14 | 压缩兜底改为沿 user 边界整轮折叠至窗口 60%；每轮请求统一 `_open_round`（复用渠道 + 同渠道重试 + 跨渠道 failover） | 原按消息条数估算放大 9 倍导致压缩永不触发、超窗后被上游 400 打断；续轮原先零重试零切换，单渠道一次抖动即中断长任务 |
 
 ---
 
