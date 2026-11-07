@@ -5,9 +5,13 @@
 - GET /maintain-agent/sessions/{id}/stream：SSE 订阅任务事件（回放缓冲 + 实时跟随 + 心跳）；
 - POST /maintain-agent/sessions/{id}/stop：取消执行中的任务；
 - POST /maintain-agent/approve：审批决议（confirm_required 卡片的批准/拒绝）；
-- GET/POST/PATCH/DELETE /maintain-agent/sessions*：会话管理（统一响应格式）。
-（v0.11.0：导出下载端点随数据治理工具下线而删除）
+- GET/POST/PATCH/DELETE /maintain-agent/sessions*：会话管理（统一响应格式）；
+- GET /maintain-agent/sessions/{id}/export：导出会话全量记录（Markdown 文本，前端触发下载）——
+  内容为执行期已脱敏的落库版本，排查与归档用（v0.14.0）。
+（v0.11.0：旧导出下载端点随数据治理工具下线而删除）
 """
+
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -96,6 +100,75 @@ async def list_messages(session_id: int, db: AsyncSession = Depends(get_db),
          "createTime": str(r["create_time"])}
         for r in rows
     ]})
+
+
+_ROLE_LABELS = {"user": "用户", "assistant": "助手", "tool": "工具", "system": "系统"}
+_MODE_LABELS = {"confirm_all": "需要审批", "confirm_critical": "部分审批", "full": "完全权限"}
+
+
+def _export_markdown(session, rows: list[dict]) -> str:
+    """会话全量记录 → Markdown 文本（排查用）。
+
+    所有字段取自落库内容（执行期已经 redact 脱敏 + 8KB 截断），导出不产生新的泄露面；
+    工具调用参数与结果用四反引号围栏包裹（沙箱输出等结果内部可能含三反引号代码块）。
+    """
+    lines = [
+        "# 维护 Agent 会话导出", "",
+        f"- 会话：#{session.id} {session.title}",
+        f"- 驱动模型：{session.model_name} ｜ "
+        f"审批档位：{_MODE_LABELS.get(agent_crud.resolve_approval_mode(session), '需要审批')}",
+        f"- 消息数：{len(rows)} ｜ 会话创建：{session.create_time}",
+        f"- 导出时间：{datetime.now():%Y-%m-%d %H:%M:%S}", "",
+        "---", "",
+    ]
+    for idx, r in enumerate(rows, 1):
+        role = r["role"]
+        name = f" · {r['tool_name']}" if role == "tool" and r.get("tool_name") else ""
+        lines.append(f"## {idx}. {_ROLE_LABELS.get(role, role)}{name}（{r['create_time']}）")
+        lines.append("")
+        for call in (r.get("tool_calls") or []):
+            fn = call.get("function") or {}
+            lines.append(f"**工具调用：`{fn.get('name', '?')}`**")
+            lines.append("")
+            lines.append("```json")
+            lines.append(str(fn.get("arguments") or "{}"))
+            lines.append("```")
+            lines.append("")
+        body = (r.get("content") or "").strip()
+        if body:
+            if role == "tool":
+                lines.append("````json")
+                lines.append(body)
+                lines.append("````")
+            else:
+                lines.append(body)
+            lines.append("")
+        trace = []
+        if r.get("risk_level"):
+            trace.append(f"风险 {r['risk_level']}")
+        if r.get("approval_status") and r["approval_status"] != "none":
+            trace.append(f"审批 {r['approval_status']}")
+        if r.get("prompt_tokens") or r.get("completion_tokens"):
+            trace.append(f"tokens {r.get('prompt_tokens') or 0}/{r.get('completion_tokens') or 0}")
+        if trace:
+            lines.append("> 轨迹：" + " ｜ ".join(trace))
+            lines.append("")
+    return "\n".join(lines)
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_session(session_id: int, db: AsyncSession = Depends(get_db),
+                         admin=Depends(get_current_admin)):
+    """导出会话全量记录（Markdown）：正文 / 工具调用参数 / 工具结果 / 审批轨迹，排查与归档用"""
+    session = await _get_own_session(db, session_id, admin)
+    rows = await agent_crud.list_messages(db, session_id)
+    await log_crud.write_log(
+        db, type="admin", action="agent_session_export", user_id=admin.id, username=admin.username,
+        detail=f"导出维护Agent会话 {session_id}（消息 {len(rows)} 条）")
+    return success_response(message="ok", data={
+        "filename": f"维护Agent会话-{session.id}-{datetime.now():%Y%m%d-%H%M%S}.md",
+        "content": _export_markdown(session, rows),
+    })
 
 
 @router.patch("/sessions/{session_id}")

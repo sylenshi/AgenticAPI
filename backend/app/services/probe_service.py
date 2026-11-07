@@ -2,7 +2,8 @@
 
 与中转链路的区别：不经 resolve_target / 计费 / chat_record，后端直接注入渠道密钥
 向 base_url 发一条极小探测请求（max_tokens 16、非流式、10s 超时），只写一条 admin
-审计日志。用于维护 Agent 的渠道连通性测试（A2）与出站模型拨测（C2/C3）。
+审计日志。用于维护 Agent 的渠道连通性测试（A2）、出站模型拨测（C2/C3）
+与上游模型清单发现（list_upstream_models，GET /models）。
 
 注意：本服务是渠道密钥的合法存在地之一——密钥仅在本模块内部注入请求头，
 任何返回值不得携带密钥（返回结构里只有时延/状态码/错误摘要）。
@@ -56,6 +57,52 @@ async def probe_once(base_url: str, api_key: str, model_name: str,
         return {"ok": False, "latencyMs": latency_ms, "status": 0, "error": f"{exc.__class__.__name__}: {exc}"[:160]}
     except Exception as exc:  # 未知异常也包装为失败结果，不中断批测
         return {"ok": False, "latencyMs": 0, "status": 0, "error": f"{exc.__class__.__name__}"[:160]}
+
+
+def _models_url(base_url: str) -> str:
+    """由 completions 端点推导 /models 地址：剥掉 /chat/completions 后缀拼 /models"""
+    root = base_url.rstrip("/")
+    if root.endswith("/chat/completions"):
+        root = root[: -len("/chat/completions")]
+    return root + "/models"
+
+
+async def list_upstream_models(base_url: str, api_key: str, timeout: int = 20) -> dict:
+    """
+    拉取上游 /models 模型清单（后端代持密钥，Error as Data，绝不抛异常）。
+    用于维护 Agent 的上游模型发现：密钥仅在请求头瞬时注入，返回值只含模型 ID 列表。
+    """
+    url = _models_url(base_url)
+    start = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        latency_ms = int((time.time() - start) * 1000)
+        if resp.status_code == 200:
+            try:
+                data = resp.json().get("data") or []
+            except Exception:
+                return {"ok": False, "latencyMs": latency_ms, "status": 200,
+                        "error": "上游响应不是 OpenAI /models 结构（缺 data 字段）"}
+            ids = sorted({str(m.get("id")) for m in data
+                          if isinstance(m, dict) and m.get("id")})
+            return {"ok": True, "latencyMs": latency_ms, "status": 200,
+                    "total": len(ids), "models": ids}
+        try:
+            err = str(resp.json().get("error", {}).get("message") or resp.text)[:160]
+        except Exception:
+            err = resp.text[:160]
+        if resp.status_code == 404:
+            err += "；上游无 /models 路由（agent plan 等专用端点常见），可改用 test_channel 对候选模型逐名试拨"
+        elif resp.status_code == 401:
+            err += "；渠道密钥可能已失效或无权限，可用 rotate_channel_key 更新后重试"
+        return {"ok": False, "latencyMs": latency_ms, "status": resp.status_code, "error": err}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "latencyMs": int((time.time() - start) * 1000), "status": 0,
+                "error": f"{exc.__class__.__name__}: {exc}"[:160]}
+    except Exception as exc:
+        return {"ok": False, "latencyMs": 0, "status": 0,
+                "error": f"{exc.__class__.__name__}"[:160]}
 
 
 async def probe_channel(db: AsyncSession, channel_name: str, model_names: list[str]) -> dict:

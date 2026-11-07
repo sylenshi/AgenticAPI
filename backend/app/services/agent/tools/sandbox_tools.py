@@ -62,9 +62,10 @@ def register_sandbox_tools() -> None:
         name="sandbox_exec",
         description=("在隔离的 Linux 容器沙箱内执行任意 shell 命令（审批卡展示完整命令，是否弹卡由会话审批档位决定）。"
                      "内置 curl / jq / python3(+httpx/pymysql)，可访问公网；已注入站内 MySQL 连接环境变量"
-                     "（MYSQL_HOST/PORT/USER/PASSWORD/DATABASE，数据治理用，严禁查询凭证列）。适用场景：测试任意 API 端点"
-                     "（如给定 base_url+key+model 直发请求验证可用性）、拉取上游 /v1/models 对比定价、"
-                     "脚本化批量诊断、站内数据统计/治理脚本。文件在 /workspace/s{会话id} 下跨命令保留"
+                     "（MYSQL_HOST/PORT/USER/PASSWORD/DATABASE，数据治理用，严禁查询凭证列）。适用场景：无需密钥的 API 端点"
+                     "测试、脚本化批量诊断、站内数据统计/治理脚本。注意：渠道密钥永不注入沙箱——需要密钥的上游操作"
+                     "（拉上游模型清单 list_upstream_models、拨测/候选试拨 test_channel、轮换密钥 rotate_channel_key）"
+                     "一律走站内工具（后端代持密钥执行）。文件在 /workspace/s{会话id} 下跨命令保留"
                      "（容器空闲自停后清空）。使用守则：优先使用站内定制工具（更快更安全），沙箱仅作兜底；"
                      "命令保持幂等可读；输出过大时用 head/tail/jq 截取。"),
         parameters={"type": "object", "properties": {

@@ -57,6 +57,13 @@
             <template #icon><icon-plus/></template>
             新建会话
           </a-button>
+          <a-tooltip content="导出当前会话记录（Markdown，含工具调用与审批轨迹）">
+            <a-button type="outline" size="small" :loading="exporting"
+                      :disabled="!agentStore.currentSessionId" @click="exportSession">
+              <template #icon><icon-download/></template>
+              导出
+            </a-button>
+          </a-tooltip>
           <a-button type="outline" size="small" status="danger" @click="confirmClear">
             <template #icon><icon-delete/></template>
             清空
@@ -136,11 +143,15 @@ import ChatMessages from '@/components/studio/ChatMessages.vue'
 import AgentInput from '@/components/agent/AgentInput.vue'
 import {useAgentStore} from '@/stores/agent'
 import {useModelListStore} from '@/stores/modelList'
+import {exportAgentSession} from '@/api/agent'
+import {getErrorMessage} from '@/api/request'
 import {confirmDialog} from '@/utils/feedback'
 
 const agentStore = useAgentStore()
 const modelListStore = useModelListStore()
 const loading = ref(false)
+/** 会话导出进行中（导出当前会话记录为 Markdown 下载） */
+const exporting = ref(false)
 /** 使用提示 / 安全提示弹窗开关 */
 const usageVisible = ref(false)
 const safetyVisible = ref(false)
@@ -156,6 +167,7 @@ const usageHtml = md.render(`
 ### 怎么下达任务
 - 一句话描述目标即可，无需拆步骤：\`出一份巡检报告\`、\`测一遍所有渠道\`、\`统计 logs 表占用并清理 90 天前的日志\`
 - 复合任务它会自己规划多步：\`检查所有模型可用性，然后告诉我哪些渠道有问题\`
+- **模型发现**：让它拉上游模型清单对照差集（\`看看火山方舟上游还有哪些模型可以接入\`）；上游没有清单接口时，它会逐名试拨验证候选模型；上游凭证到期，把新密钥发到对话里让它轮换即可
 
 ### 内置技能（SOP）
 - 已内置六个运维 SOP：**站点巡检 / 数据治理 / 渠道排障 / 额度水位研判 / 新模型上线 / 故障复盘**，自然语言即可触发
@@ -166,12 +178,12 @@ const usageHtml = md.render(`
 - 大数据全量导出沙箱拿不出来（输出上限 64KB），需要时登服务器用 mysqldump
 `)
 const safetyHtml = md.render(`
-### 操作确认（共 23 个白名单工具）
+### 操作确认（共 25 个白名单工具）
 | 类型 | 范围 | 执行方式 |
 | --- | --- | --- |
-| **只读**（14 个） | 巡检 / 统计 / 拨测 / 查询 | 直接执行，不打扰 |
+| **只读**（15 个） | 巡检 / 统计 / 拨测 / 查询 / 上游模型发现 | 直接执行，不打扰 |
 | **普通写**（3 个） | 修改渠道 / 模型配置、保存技能 | 按审批档位确认或直行 |
-| **关键操作**（6 个） | 删除渠道 / 模型 / 技能、新增渠道 / 模型、沙箱命令 | 默认必弹确认卡 |
+| **关键操作**（7 个） | 删除渠道 / 模型 / 技能、新增渠道 / 模型、沙箱命令、密钥轮换 | 默认必弹确认卡 |
 
 ### 审批档位（右侧面板可切换）
 - **需要审批**（默认）：所有写操作都弹审批卡
@@ -184,7 +196,7 @@ const safetyHtml = md.render(`
 - 单任务上限 40 轮工具调用、成本达到设置页上限（默认 2 元）自动小结收尾，可一键继续
 
 ### 密钥与审计
-- 渠道密钥**全程递归脱敏**：界面只显示掩码（如 \`sk-1****wxyz\`），数据库与前端均不存密钥原文
+- 渠道密钥**全程递归脱敏**：界面与对话记录只显示掩码（如 \`sk-1****wxyz\`），密钥仅存于渠道配置本体，日志 / 消息 / 审计全掩码；需要密钥的上游操作由后端代持密钥执行，密钥不进入对话上下文
 - **双轨留痕**：每次工具调用（参数 + 结果摘要）与每次审批决定（批准 / 拒绝 / 超时）均写入审计日志，可在「监控面板 → 调用日志」按管理员筛选追溯
 - 宿主机侧没有 shell 与通用文件访问；唯一例外是容器沙箱 \`sandbox_exec\`（隔离加固，数据库凭证以环境变量注入，输出经脱敏）
 `)
@@ -267,6 +279,29 @@ async function confirmClear() {
   const ok = await confirmDialog(
       `将删除全部 ${agentStore.sessions.length} 个会话及所有消息记录，不可恢复。`, '清空会话', '清空', true)
   if (ok) await agentStore.clearSessions()
+}
+
+/** ═══════════ 导出当前会话记录（Markdown：正文/工具调用/结果/审批轨迹，排查与归档用）═══════════ */
+async function exportSession() {
+  const sessionId = agentStore.currentSessionId
+  if (!sessionId || exporting.value) return
+  exporting.value = true
+  try {
+    const res = await exportAgentSession(sessionId)
+    const {filename, content} = res.data
+    const blob = new Blob([content], {type: 'text/markdown;charset=utf-8'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || `维护Agent会话-${sessionId}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+    Message.success('会话记录已导出')
+  } catch (err) {
+    Message.error(getErrorMessage(err, '会话导出失败'))
+  } finally {
+    exporting.value = false
+  }
 }
 </script>
 

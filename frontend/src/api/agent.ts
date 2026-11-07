@@ -152,6 +152,11 @@ export function listAgentMessages(sessionId: number) {
     return request.get<{ list: agentServerMessage[] }>(`/maintain-agent/sessions/${sessionId}/messages`)
 }
 
+/** 导出会话全量记录（服务端拼 Markdown：正文/工具调用/结果/审批轨迹），返回文件名与内容供前端触发下载 */
+export function exportAgentSession(sessionId: number) {
+    return request.get<{ filename: string; content: string }>(`/maintain-agent/sessions/${sessionId}/export`)
+}
+
 export function updateAgentSession(sessionId: number, patch: Partial<{
     title: string
     modelName: string

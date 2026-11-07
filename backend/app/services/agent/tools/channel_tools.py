@@ -1,8 +1,13 @@
 """渠道管理域工具：A1 查询 / A2 连通性测试 / A3 配置修改 / A4 绑定一致性检查
-+ A5 新增 / A6 删除（v0.11.0 精简：密钥轮换下线，走管理页）
++ A5 新增 / A6 删除 + A8 上游模型发现 / A9 密钥轮换（v0.14.0）
+
+v0.14.0 安全用钥通道：需要密钥的上游操作不再依赖"管理员给钥"，统一为
+"Agent 引用渠道名 → 后端代持密钥执行 → 结果脱敏返回"。A8 拉上游 /models、
+A9 恢复密钥轮换（v0.11.0 曾下线为"走管理页"，但凭证到期类运维因此无法闭环）；
+A2 同步放宽为可试拨声明列表之外的候选模型。
 
 密钥红线：A1 返回的渠道信息永不携带 api_key，仅 apiKeyHint（尾 4 位）；
-A2 的密钥注入发生在 probe_service 内部；A5 的 api_key 仅在入参→service
+A2/A8 的密钥注入发生在 probe_service 内部；A5/A9 的 api_key 仅在入参→service
 落库路径上瞬时存在，审批卡与 agent_message 均为脱敏版本（registry 管线），
 工具返回值只带尾 4 位提示。
 """
@@ -67,7 +72,7 @@ async def list_channels(ctx: ToolContext, args: dict) -> dict:
 
 
 async def test_channel(ctx: ToolContext, args: dict) -> dict:
-    """A2 渠道连通性测试：scope=one 抽一个模型 / all 遍历全部支持模型（密钥后端注入，免计费）"""
+    """A2 渠道连通性测试：scope=one 试拨一个模型（可指定声明列表之外的候选名）/ all 遍历支持模型（密钥后端注入，免计费）"""
     channel_name = (args.get("channel_name") or "").strip()
     scope = args.get("scope") or "one"
     if scope not in ("one", "all"):
@@ -79,12 +84,13 @@ async def test_channel(ctx: ToolContext, args: dict) -> dict:
         raise ValueError(f"渠道 {channel_name} 不存在，可用渠道名见 list_channels 结果")
 
     support = parse_json_list(channel.get("support_models"))
+    not_declared = False
     if scope == "one":
         target = model_name if model_name else (support[0] if support else "")
         if not target:
-            raise ValueError(f"渠道 {channel_name} 未配置支持模型，无法抽查")
-        if support and target not in support:
-            raise ValueError(f"模型 {target} 不在渠道 {channel_name} 的支持列表 {support} 中")
+            raise ValueError(f"渠道 {channel_name} 未配置支持模型，也未指定 model_name，无法抽查")
+        # v0.14.0：允许试拨声明列表之外的候选模型（上游是否支持某模型的唯一可靠验证法），显式标注
+        not_declared = bool(support) and target not in support
         models = [target]
     else:
         models = support
@@ -94,7 +100,31 @@ async def test_channel(ctx: ToolContext, args: dict) -> dict:
     result = await probe_service.probe_channel(ctx.db, channel_name, models)
     ok = result.get("okCount", 0)
     total = result.get("probed", 0)
-    result["_summary"] = f"渠道 {channel_name} 拨测 {total} 个模型：可用 {ok} / 失败 {total - ok}"
+    if not_declared:
+        result["notInDeclaredList"] = True
+    result["_summary"] = (f"渠道 {channel_name} 拨测 {total} 个模型：可用 {ok} / 失败 {total - ok}"
+                          + ("（目标不在渠道声明列表，属候选试拨）" if not_declared else ""))
+    return result
+
+
+async def list_upstream_models(ctx: ToolContext, args: dict) -> dict:
+    """A8 上游模型清单发现：后端代持密钥 GET {base}/models，返回上游模型 ID 列表（免计费）"""
+    channel_name = (args.get("channel_name") or "").strip()
+    channel = await channel_crud.get_by_name(ctx.db, channel_name)
+    if not channel:
+        raise ValueError(f"渠道 {channel_name} 不存在，可用渠道名见 list_channels 结果")
+
+    result = await probe_service.list_upstream_models(channel["base_url"], channel.get("api_key") or "")
+    if result.get("ok"):
+        ids = result.get("models") or []
+        result["models"] = ids[:200]
+        if len(ids) > 200:
+            result["truncated"] = True
+        # 附渠道声明列表便于对照差集（声明了但上游没有 → 需清理；上游有但未声明 → 接入候选）
+        result["declaredSupportModels"] = parse_json_list(channel.get("support_models"))
+        result["_summary"] = f"渠道 {channel_name} 上游共 {result['total']} 个模型（{result['latencyMs']}ms）"
+    else:
+        result["_summary"] = f"拉取上游模型清单失败（HTTP {result.get('status')}）：{str(result.get('error'))[:80]}"
     return result
 
 
@@ -119,7 +149,7 @@ async def _update_channel_preview(ctx: ToolContext, args: dict) -> str:
 
 
 async def update_channel(ctx: ToolContext, args: dict) -> dict:
-    """A3 渠道配置修改（L1）：启停 / 超时 / 描述 / 支持模型；名称与密钥不可改（密钥走管理页）"""
+    """A3 渠道配置修改（L1）：启停 / 超时 / 描述 / 支持模型；名称不可改，密钥变更用 rotate_channel_key"""
     channel_name = (args.get("channel_name") or "").strip()
     update: dict = {}
     if "status" in args and args["status"] is not None:
@@ -305,6 +335,39 @@ async def delete_channel(ctx: ToolContext, args: dict) -> dict:
     }
 
 
+async def _rotate_key_preview(ctx: ToolContext, args: dict) -> str:
+    """A9 审批卡预览：新旧密钥均只显尾 4 位，明文不落卡"""
+    channel_name = (args.get("channel_name") or "").strip()
+    channel = await channel_crud.get_by_name(ctx.db, channel_name)
+    new_key = args.get("api_key") or ""
+    new_hint = f"****{new_key[-4:]}" if len(new_key) >= 8 else "（过短无效，执行会被拒绝）"
+    if not channel:
+        return f"渠道 {channel_name} 不存在（执行会被拒绝）"
+    return (f"将更新渠道「{channel_name}」的上游密钥（凭证到期/轮换）：\n"
+            f"· 旧密钥：{_key_hint(channel.get('api_key'))}\n"
+            f"· 新密钥：{new_hint}（明文不展示）\n"
+            f"· 渠道 base_url：{channel['base_url']}")
+
+
+async def rotate_channel_key(ctx: ToolContext, args: dict) -> dict:
+    """A9 更新渠道密钥（L2）：管理员在对话中提供新钥，新钥仅入参→落库瞬时存在（与 A5 create_channel 同路径）"""
+    channel_name = (args.get("channel_name") or "").strip()
+    new_key = (args.get("api_key") or "").strip()
+    if len(new_key) < 8:
+        raise ValueError("api_key（新密钥）至少 8 个字符，疑似传错")
+    channel = await channel_crud.get_by_name(ctx.db, channel_name)
+    if not channel:
+        raise ValueError(f"渠道 {channel_name} 不存在，可用渠道名见 list_channels 结果")
+
+    await channel_crud.update_by_name(ctx.db, channel_name, {"api_key": new_key})
+    return {
+        "ok": True, "channel": channel_name,
+        "newKeyHint": _key_hint(new_key),
+        "hint": f"建议下一步：test_channel(channel_name='{channel_name}', scope='one') 验证新密钥连通性",
+        "_summary": f"渠道「{channel_name}」密钥已更新（新钥尾 4 位 {_key_hint(new_key)}）",
+    }
+
+
 def register_channel_tools() -> None:
     register(ToolDef(
         name="list_channels",
@@ -316,17 +379,29 @@ def register_channel_tools() -> None:
     ))
     register(ToolDef(
         name="test_channel",
-        description="对指定上游渠道做连通性拨测：scope=one 抽查一个模型（可指定），scope=all 遍历全部支持模型。直发探测请求，免计费，返回逐模型 {ok, 时延ms, HTTP状态, 错误}。",
+        description=("对指定上游渠道做连通性拨测：scope=one 试拨一个模型——model_name 可传渠道声明列表之外的任意候选名"
+                     "（验证上游是否支持某模型的唯一可靠手段，结果带 notInDeclaredList 标注），scope=all 遍历全部支持模型。"
+                     "密钥由后端代持注入，免计费，返回逐模型 {ok, 时延ms, HTTP状态, 错误}。"),
         parameters={"type": "object", "properties": {
             "channel_name": {"type": "string", "description": "渠道名（见 list_channels）"},
-            "scope": {"type": "string", "enum": ["one", "all"], "description": "one=抽查单模型，all=遍历全部支持模型"},
-            "model_name": {"type": "string", "description": "scope=one 时可指定模型名（默认取支持列表第一个）"},
+            "scope": {"type": "string", "enum": ["one", "all"], "description": "one=试拨单模型，all=遍历全部支持模型"},
+            "model_name": {"type": "string", "description": "scope=one 时可指定模型名（声明列表内外均可，列表外属候选试拨；默认取支持列表第一个）"},
         }, "required": ["channel_name"]},
         risk="L0", handler=test_channel, timeout=180,
     ))
     register(ToolDef(
+        name="list_upstream_models",
+        description=("拉取指定渠道上游的 /models 模型清单（后端代持密钥调用，免计费），返回上游可用模型 ID 全列表"
+                     "与渠道当前声明列表，便于对照差集发现可接入的新模型。404=上游无 /models 路由（agent plan 等"
+                     "专用端点常见），此时改用 test_channel 对候选模型逐名试拨。"),
+        parameters={"type": "object", "properties": {
+            "channel_name": {"type": "string", "description": "渠道名（见 list_channels）"},
+        }, "required": ["channel_name"]},
+        risk="L0", handler=list_upstream_models, timeout=60,
+    ))
+    register(ToolDef(
         name="update_channel",
-        description="修改渠道配置（可逆写操作）：启用/停用 status、超时 timeout（秒）、描述、支持模型列表 support_models。渠道名与密钥不可改。",
+        description="修改渠道配置（可逆写操作）：启用/停用 status、超时 timeout（秒）、描述、支持模型列表 support_models。渠道名不可改；密钥变更用 rotate_channel_key（关键操作）。",
         parameters={"type": "object", "properties": {
             "channel_name": {"type": "string", "description": "渠道名（定位键）"},
             "status": {"type": "boolean", "description": "启用 true / 停用 false"},
@@ -368,4 +443,14 @@ def register_channel_tools() -> None:
             "dry_run": {"type": "boolean", "description": "true=预览影响（首次必传），false=真删（需管理员确认预览后）"},
         }, "required": ["channel_name", "dry_run"]},
         risk="L2", handler=delete_channel, preview=_delete_channel_preview, session_limit=10,
+    ))
+    register(ToolDef(
+        name="rotate_channel_key",
+        description=("更新指定渠道的上游 API 密钥（关键写操作）：上游凭证到期/轮换时使用。管理员在对话中提供新密钥，"
+                     "新钥仅在入参→落库路径瞬时存在，审批卡与任何返回只显示尾 4 位。更新后立即 test_channel 验证连通性。"),
+        parameters={"type": "object", "properties": {
+            "channel_name": {"type": "string", "description": "渠道名（定位键）"},
+            "api_key": {"type": "string", "description": "新的上游 API 密钥（≥8 字符，任何展示只留尾 4 位）"},
+        }, "required": ["channel_name", "api_key"]},
+        risk="L2", handler=rotate_channel_key, preview=_rotate_key_preview,
     ))
