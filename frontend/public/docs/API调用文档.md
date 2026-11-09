@@ -8,9 +8,7 @@
 等第三方 AI 工具中把本站当作一个 "OpenAI" 来配置，也可以用 OpenAI 官方 SDK / curl 直接调用，
 用本站密钥（`sk-` 开头）访问站内接入的所有模型。
 
-> **关于接口地址**：本文以线上部署地址 `https://platform.shienhao.cn` 为例（本地部署时对应 `http://localhost:2027`）。
-> 站点部署到公网后，请以站内实际展示的地址为准（控制台-秘钥页、模型广场的模型详情面板都会自动展示当前真实地址），
-> 若使用本地部署，把下文中的 `https://platform.shienhao.cn` 替换为 `http://localhost:2027` 即可。
+> **关于接口地址**：本站接口地址为 `https://platform.shienhao.cn`（控制台-秘钥页、模型广场的模型详情面板也会展示当前地址）。
 
 ## 快速开始
 
@@ -27,7 +25,7 @@
 
 | 项目      | 值                                  | 说明                                          |
 |---------|------------------------------------|---------------------------------------------|
-| Base URL | `https://platform.shienhao.cn/v1`         | OpenAI 兼容基地址，部署后替换为实际地址                |
+| Base URL | `https://platform.shienhao.cn/v1`         | OpenAI 兼容基地址                                |
 | API Key  | `sk-xxxxxxxx`                      | 在「控制台 → 秘钥」页创建                          |
 | 模型名称    | 如 `glm-4.7`                        | 见模型广场，或调 `GET /v1/models` 获取你可用的模型，调用时填在 `model` 字段 |
 
@@ -82,7 +80,7 @@ data: [DONE]
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://platform.shienhao.cn/v1",   # 部署后替换为实际地址
+    base_url="https://platform.shienhao.cn/v1",
     api_key="sk-你的API密钥",
 )
 
@@ -117,7 +115,7 @@ for chunk in stream:
 import OpenAI from "openai";
 
 const client = new OpenAI({
-  baseURL: "https://platform.shienhao.cn/v1",   // 部署后替换为实际地址
+  baseURL: "https://platform.shienhao.cn/v1",
   apiKey: "sk-你的API密钥",
 });
 
@@ -152,7 +150,7 @@ print(response.choices[0].message.content)
 Cherry Studio、ChatBox、LobeChat、沉浸式翻译等支持自定义 OpenAI 接口的工具均可接入：
 
 1. 在工具的模型服务商设置中选择「自定义 / OpenAI 兼容」类型；
-2. **API 地址**填 `https://platform.shienhao.cn/v1`（部署后替换为实际地址）；
+2. **API 地址**填 `https://platform.shienhao.cn/v1`；
 3. **API 密钥**填你的 `sk-` 密钥；
 4. 添加模型：若工具支持「获取模型列表 / 自动发现」，会通过 `GET /v1/models` 自动拉取你可用的模型；
    否则手动添加，模型名填模型广场中展示的名称（如 `glm-4.7`）。

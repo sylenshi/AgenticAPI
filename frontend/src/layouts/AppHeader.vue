@@ -23,9 +23,9 @@ const updateActiveIndex = () => {
     // 前缀匹配：当前路径以导航路径开头，且导航路径是 /dashboard 这种有子路由的情况
     return (item.to !== '/' && currentPath.startsWith(item.to + '/'));
   })
-  if (index !== -1) {
-    activeIndex.value = index
-  }
+  // 路径不在主导航里（如 /docs）时 index 为 -1，直接赋值清掉残留高亮，
+  // 避免"从首页进文档页，首页还亮着"的误导
+  activeIndex.value = index
 }
 watch(() => route.path, updateActiveIndex, {immediate: true})
 
@@ -71,13 +71,15 @@ const handleDropdownVisibleChange = (visible: boolean) => {
   if (visible) void userStore.fetchUserInfo()
 }
 
-// 已登录用户下拉菜单：余额跳转概览、切换头像、退出登录
+// 已登录用户下拉菜单：余额跳转概览、切换头像、使用文档、退出登录
 const handleUserCommand = (key: string | number | Record<string, unknown> | undefined) => {
   const command = String(key)
   if (command === 'balance') {
     router.push('/dashboard/overview')
   } else if (command === 'avatar') {
     void handleUpdateAvatar()
+  } else if (command === 'docs') {
+    router.push('/docs')
   } else if (command === 'logout') {
     void handleLogout()
   }
@@ -136,6 +138,10 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
               <a-doption value="avatar">
                 <template #icon><icon-swap/></template>
                 切换头像
+              </a-doption>
+              <a-doption value="docs">
+                <template #icon><icon-book/></template>
+                使用文档
               </a-doption>
               <a-doption value="logout" class="user-logout-option">
                 <template #icon><icon-export/></template>

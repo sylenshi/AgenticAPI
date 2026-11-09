@@ -96,9 +96,10 @@ const docGroups = [
   {
     title: '开发者文档',
     docs: [
-      {title: '项目介绍文档', path: '/docs/README.md'},
-      {title: '前端样式规范', path: '/docs/前端UI构建规范.md'},
       {title: '后端接口规范', path: '/docs/后端API接口规范.md'},
+      {title: '数据库设计', path: '/docs/数据库设计文档.md'},
+      {title: '维护 Agent 设计', path: '/docs/维护Agent设计文档.md'},
+      {title: '前端样式规范', path: '/docs/前端UI构建规范.md'},
     ],
   },
 ]
