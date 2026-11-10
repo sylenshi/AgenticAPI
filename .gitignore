@@ -138,6 +138,7 @@ dmypy.json
 
 # AI 编码工具的本地会话/计划目录
 .zcode/
+.workbuddy/
 
 # 部署脚本本地文档（含机器相关信息，仅存本地）
 /deploy.md
