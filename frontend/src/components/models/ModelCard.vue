@@ -9,16 +9,18 @@
       </div>
 
       <div class="model-title-wrap">
-        <div class="model-name" :title="model.name">{{ model.name }}</div>
+        <div class="model-name-row">
+          <div class="model-name" :title="model.name">{{ model.name }}</div>
+          <span v-if="model.isPin" class="pin-mark">置顶</span>
+        </div>
         <div class="model-tags">
           <a-tag :color="groupTagColor(model.modelGroup)" size="small">
             {{ groupTagName(model.modelGroup) }}
           </a-tag>
-          <a-tag v-for="tag in splitLabel(model.label).slice(0, 2)" :key="tag" size="small"
-                 color="arcoblue">
+          <a-tag v-for="tag in splitLabel(model.label).slice(0, 2)" :key="tag" size="small">
             {{ tag }}
           </a-tag>
-          <a-tag v-if="splitLabel(model.label).length > 2" size="small" :color="tagColorByName(model.label)">
+          <a-tag v-if="splitLabel(model.label).length > 2" size="small">
             +{{ splitLabel(model.label).length - 2 }}
           </a-tag>
         </div>
@@ -65,8 +67,8 @@
     <!-- 卡片底：能力标识 + 详情入口 -->
     <div class="model-card-foot">
       <div class="model-features">
-        <span v-if="model.supportVision" class="model-feature">视觉</span>
-        <span v-if="!model.status" class="model-feature model-feature-off">停用</span>
+        <span v-if="model.supportVision" class="model-feature"><i class="feature-dot"/>视觉</span>
+        <span v-if="!model.status" class="model-feature model-feature-off"><i class="feature-dot"/>停用</span>
       </div>
       <a-button type="text" size="mini" @click="emit('detail', model)">
         更多详情
@@ -86,7 +88,6 @@ import {testModel} from '@/api/models'
 import {getErrorMessage} from '@/api/request'
 import {useUserStore} from '@/stores/user'
 import {copyText} from '@/utils/feedback'
-import {tagColorByName} from '@/utils/colors'
 import {groupTagColor, groupTagName, splitLabel} from '@/utils/model'
 import type {modelInfoSchema} from '@/types'
 
@@ -174,37 +175,21 @@ async function handleProbe() {
   transform var(--transition-base);
 }
 
-/* 悬停：描边变主色 + 阴影升级 + 轻微上浮（与工坊建议卡同一交互语言） */
+/* 悬停只提亮描边，去掉上浮与营销式大阴影 */
 .model-card:hover {
   border-color: var(--color-primary-light);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
-/* 置顶模型：整卡金色浅底 + 描边 + 右上角徽章 */
-.model-card.is-pin {
-  position: relative; /* 徽章 ::after 的定位锚点 */
-  background: linear-gradient(160deg, var(--color-gold-lighter), var(--color-white) 55%);
-  border-color: var(--color-gold);
-}
-
-/* 置顶卡 hover 时保持金色系描边，不退回普通卡的蓝色 */
-.model-card.is-pin:hover {
-  border-color: var(--color-warning);
-}
-
-.model-card.is-pin::after {
-  content: '推荐调用';
-  position: absolute;
-  top: -10px;
-  right: 12px;
-  padding: 1px 8px;
-  font-size: var(--text-xs);
-  line-height: 18px;
-  color: var(--color-white);
-  background: linear-gradient(90deg, var(--color-gold), var(--color-warning));
-  border-radius: var(--radius-full);
   box-shadow: var(--shadow-sm);
+}
+
+/* 置顶模型：一条细脊线 + 名称旁小字标记，替代整卡金色渐变与浮空胶囊角标 */
+.model-card.is-pin {
+  border-color: var(--color-border);
+  border-left: 2px solid var(--color-gold);
+}
+
+.model-card.is-pin:hover {
+  border-color: var(--color-primary-light);
+  border-left-color: var(--color-gold);
 }
 
 /* 卡片头 */
@@ -230,13 +215,32 @@ async function handleProbe() {
   min-width: 0;
 }
 
+.model-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 模型名是卡片唯一焦点：16px 主标题，其余信息逐级降权 */
 .model-name {
+  min-width: 0;
   font-size: var(--text-base);
   font-weight: var(--font-semibold);
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.pin-mark {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: 16px;
 }
 
 .model-tags {
@@ -263,14 +267,14 @@ async function handleProbe() {
 }
 
 /* 价格区 */
+/* 价格区去掉灰底块，用一条细分隔线把「名称层」与「数据层」分开 */
 .model-price {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-1);
-  margin-top: var(--space-2);
-  padding: var(--space-1) var(--space-1);
-  background-color: var(--color-gray-50);
-  border-radius: var(--radius-md);
+  margin-top: var(--space-3);
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--color-border);
   flex: 1;
 }
 
@@ -286,10 +290,11 @@ async function handleProbe() {
   margin-bottom: 2px;
 }
 
+/* 价格数字是卡片次焦点：14–16px 等宽，标签退回 12px 灰色 */
 .price-item-value {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  font-weight: var(--font-semibold);
+  font-weight: var(--font-medium);
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
 }
@@ -320,13 +325,20 @@ async function handleProbe() {
   gap: var(--space-1);
 }
 
+/* 能力标识改为小色点 + 文字，去掉一排描边小胶囊 */
 .model-feature {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 0 5px;
-  line-height: 18px;
+}
+
+.feature-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-primary);
 }
 
 .model-feature-pin {
@@ -336,6 +348,14 @@ async function handleProbe() {
 
 .model-feature-off {
   color: var(--color-error);
-  border-color: var(--color-error);
+}
+
+.model-feature-off .feature-dot {
+  background: var(--color-error);
+}
+
+/* 窄屏单列卡片：价格数字不再被三列挤到换行 */
+@media (max-width: 768px) {
+  .price-item-value { font-size: var(--text-sm); }
 }
 </style>

@@ -157,7 +157,7 @@ function handleExport(session: studioSession) {
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: var(--color-gray-50);
+    background: var(--color-white);
 }
 
 .sidebar-header {

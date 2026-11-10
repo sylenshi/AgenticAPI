@@ -71,6 +71,12 @@ const handleDropdownVisibleChange = (visible: boolean) => {
   if (visible) void userStore.fetchUserInfo()
 }
 
+// 窄屏导航下拉：value 直接就是 navItems 里的路由，选中即跳转
+const handleMobileNav = (key: string | number | Record<string, unknown> | undefined) => {
+  const to = String(key ?? '')
+  if (to) void router.push(to)
+}
+
 // 已登录用户下拉菜单：余额跳转概览、切换头像、使用文档、退出登录
 const handleUserCommand = (key: string | number | Record<string, unknown> | undefined) => {
   const command = String(key)
@@ -108,8 +114,17 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
         </ul>
       </nav>
 
-      <!-- 【导航栏右侧】未登录显示 访客/登录/注册，已登录显示 用户下拉 -->
+      <!-- 【导航栏右侧】窄屏主导航入口：≥769px 主导航常显，窄屏由这个下拉承载同样 5 个入口 -->
       <div class="header-actions">
+        <a-dropdown trigger="click" @select="handleMobileNav">
+          <button class="mobile-nav-trigger" aria-label="打开导航菜单">
+            <icon-menu/>
+          </button>
+          <template #content>
+            <a-doption v-for="item in navItems" :key="item.id" :value="item.to">{{ item.label }}</a-doption>
+          </template>
+        </a-dropdown>
+
         <template v-if="!userStore.isLoggedIn">
           <a-button type="text" size="small" @click="guestDialogVisible = true">访客</a-button>
           <a-button size="small" @click="userStore.openAuthDialog('login')">登录</a-button>
@@ -294,6 +309,27 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
   gap: var(--space-2);
 }
 
+/* 窄屏导航入口：桌面隐藏，≤768px 与常显主导航二选一 */
+.mobile-nav-trigger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+
+.mobile-nav-trigger:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
 /* 已登录：用户下拉入口 */
 .user-entry {
   display: inline-flex;
@@ -347,5 +383,34 @@ const handleUserCommand = (key: string | number | Record<string, unknown> | unde
 .user-arrow {
   color: var(--color-text-muted);
   font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .mobile-nav-trigger {
+    display: inline-flex;
+  }
+
+  .header-actions {
+    gap: var(--space-1);
+  }
+
+  .brand-logo-img {
+    width: 30px;
+    height: 30px;
+  }
+
+  .brand-text {
+    font-size: var(--text-lg);
+  }
+
+  /* 头像与下拉箭头足以表达入口，窄屏省略用户名避免顶栏挤压 */
+  .user-name,
+  .user-arrow {
+    display: none;
+  }
+
+  .user-entry {
+    padding: 0;
+  }
 }
 </style>

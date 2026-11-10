@@ -1,5 +1,6 @@
 <!-- 模型工坊：对话式 Playground
      布局：左侧会话侧边栏 + 中间对话窗口与输入框 + 右侧参数面板，两侧可折叠。
+     ≥1201px 三栏常驻；769–1200px 参数面板默认收起；≤768px 双侧栏改抽屉、由顶部工具条唤出。
      对话走站内 /studio/chat 接口（登录、不计费），会话本地存储。 -->
 <template>
     <div class="studio-page">
@@ -8,23 +9,40 @@
             <SessionSidebar />
         </div>
 
+        <!-- 抽屉遮罩：仅窄屏双侧栏以覆盖层形式出现时生效 -->
+        <div v-if="isNarrow && (sidebarOpen || panelOpen)" class="studio-mask" @click="closeDrawers"/>
+
         <!-- 中：对话区 -->
         <div class="studio-center">
-            <button class="panel-toggle left-toggle" :title="sidebarOpen ? '收起侧边栏' : '展开侧边栏'"
-                    @click="sidebarOpen = !sidebarOpen">
-                <icon-left v-if="sidebarOpen"/>
-                <icon-right v-else/>
-            </button>
-            <button class="panel-toggle right-toggle" :title="panelOpen ? '收起参数面板' : '展开参数面板'"
-                    @click="panelOpen = !panelOpen">
-                <icon-right v-if="panelOpen"/>
-                <icon-left v-else/>
-            </button>
+            <!-- 会话标题条：折叠入口并入标题栏，取代原先贴在内容边缘的悬浮细条 -->
+            <div class="studio-bar">
+                <div class="bar-left">
+                    <button class="bar-icon-btn" :title="sidebarOpen ? '收起会话列表' : '展开会话列表'"
+                            @click="sidebarOpen = !sidebarOpen">
+                        <icon-menu/>
+                        <span class="bar-nav-label">会话</span>
+                    </button>
+                    <span class="bar-divider"></span>
+                    <span class="bar-session" :title="studioStore.currentSession?.title">
+                        {{ studioStore.currentSession?.title || '未命名会话' }}
+                    </span>
+                    <span class="bar-model">· {{ studioStore.selectedModelName || '未选择模型' }}</span>
+                    <span class="bar-model-chip">{{ studioStore.selectedModelName || '未选择模型' }}</span>
+                </div>
+                <div class="bar-right">
+                    <button class="bar-text-btn" :class="{active: panelOpen}"
+                            @click="panelOpen = !panelOpen">
+                        {{ panelOpen ? '收起参数' : '参数配置' }}
+                    </button>
+                </div>
+            </div>
 
             <div class="studio-main">
                 <WelcomePanel v-if="!studioStore.currentMessages.length"
-                              :model-name="studioStore.selectedModelName" @select="sendPrompt" />
+                              :model-name="studioStore.selectedModelName"
+                              @select="sendPrompt" @focus-panel="panelOpen = true" />
                 <ChatMessages v-else :messages="studioStore.currentMessages"
+                              :model-name="studioStore.selectedModelName"
                               :is-streaming="studioStore.isStreaming" @regenerate="handleRegenerate" />
             </div>
 
@@ -39,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, ref} from 'vue'
+import {computed, ref, onMounted, onBeforeUnmount} from 'vue'
 import {Message} from '@arco-design/web-vue'
 import SessionSidebar from '@/components/studio/SessionSidebar.vue'
 import SettingsPanel from '@/components/studio/SettingsPanel.vue'
@@ -57,6 +75,47 @@ const modelListStore = useModelListStore()
 
 const sidebarOpen = ref(true)
 const panelOpen = ref(true)
+const isNarrow = ref(false)
+
+/** ═══════════ 视口自适应：窄屏把双侧栏变抽屉，中屏参数面板默认收起 ═══════════ */
+let narrowQuery: MediaQueryList | null = null
+let compactQuery: MediaQueryList | null = null
+let viewportReady = false
+let wasCompact = false
+
+function syncViewport() {
+    const narrow = narrowQuery?.matches ?? false
+    const compact = compactQuery?.matches ?? false
+    const crossing = narrow !== isNarrow.value || compact !== wasCompact
+    // 首屏必须按视口初始化一次；此后只在断点跨越时重置，避免打断用户手动展开的状态
+    const shouldReset = !viewportReady || crossing
+    viewportReady = true
+    isNarrow.value = narrow
+    wasCompact = compact
+    if (shouldReset) {
+        sidebarOpen.value = !narrow
+        panelOpen.value = !(narrow || compact)
+    }
+}
+
+function closeDrawers() {
+    sidebarOpen.value = false
+    panelOpen.value = false
+}
+
+onMounted(() => {
+    narrowQuery = window.matchMedia('(max-width: 768px)')
+    compactQuery = window.matchMedia('(max-width: 1200px)')
+    // 首屏即按视口给一次初始状态（默认 ref 为桌面展开）
+    syncViewport()
+    narrowQuery.addEventListener('change', syncViewport)
+    compactQuery.addEventListener('change', syncViewport)
+})
+
+onBeforeUnmount(() => {
+    narrowQuery?.removeEventListener('change', syncViewport)
+    compactQuery?.removeEventListener('change', syncViewport)
+})
 
 // 当前所选模型是否支持图片输入（不支持时输入框禁用图片相关功能）
 const supportVision = computed(() => {
@@ -136,7 +195,7 @@ async function runGeneration() {
 function handleSend({text, images}: {text: string; images: studioImage[]}) {
     if (studioStore.isStreaming) return
     if (!studioStore.selectedModelName) {
-        Message.warning('请先在右侧参数面板选择模型')
+        Message.warning('请先在参数面板选择模型')
         return
     }
     if (!studioStore.currentSession) studioStore.createSession()
@@ -178,36 +237,31 @@ async function handleRegenerate() {
 .studio-page {
     display: flex;
     height: 100%;
-    background: var(--color-white);
+    position: relative;
+    background: var(--color-bg-layout);
 }
 
 .studio-aside {
     flex-shrink: 0;
     overflow: hidden;
-    transition: width 0.25s ease;
+    background: var(--color-white);
+    transition: width var(--transition-base);
 }
 
-
-/* 左侧会话列表面板 */
+/* 桌面三栏：左 240 / 中自适应 / 右 280，中间内容由各子组件统一限宽 720 */
 .studio-aside.left {
-    width: 270px;
+    width: 240px;
     border-right: 1px solid var(--color-border);
 }
 
-.studio-aside.left.collapsed {
-    width: 0;
-    border-right: none;
-}
-
-/* 右侧会话列表面板 */
 .studio-aside.right {
-    width: 270px;
+    width: 280px;
     border-left: 1px solid var(--color-border);
 }
 
-.studio-aside.right.collapsed {
+.studio-aside.collapsed {
     width: 0;
-    border-left: none;
+    border: none;
 }
 
 .studio-center {
@@ -216,6 +270,84 @@ async function handleRegenerate() {
     display: flex;
     flex-direction: column;
     position: relative;
+    background: var(--color-bg-layout);
+}
+
+/* 会话标题条：把折叠入口、当前模型、参数入口收进同一行，去掉悬浮补丁感 */
+.studio-bar {
+    flex-shrink: 0;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 0 var(--space-5);
+    background: var(--color-white);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.bar-left,
+.bar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.bar-icon-btn,
+.bar-text-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 6px;
+    height: 28px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.bar-icon-btn:hover,
+.bar-text-btn:hover,
+.bar-text-btn.active {
+    color: var(--color-primary);
+    background: var(--color-primary-lighter);
+}
+
+.bar-nav-label,
+.bar-model-chip {
+    display: none;
+}
+
+.bar-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--color-border);
+    margin: 0 var(--space-1);
+}
+
+.bar-session {
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    font-weight: var(--font-medium);
+    color: var(--color-text);
+}
+
+.bar-model {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .studio-main {
@@ -223,36 +355,62 @@ async function handleRegenerate() {
     min-height: 0;
 }
 
-/* 两侧面板折叠按钮 */
-.panel-toggle {
+.studio-mask {
     position: absolute;
-    top: 10px;
-    z-index: 10;
-    width: 22px;
-    height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-white);
-    color: var(--color-text-muted);
-    font-size: 14px;
-    cursor: pointer;
-    box-shadow: var(--shadow-sm);
-    transition: color var(--transition-fast), border-color var(--transition-fast);
+    inset: 0;
+    z-index: 20;
+    background: var(--color-black);
+    opacity: 0.32;
 }
 
-.panel-toggle:hover {
-    color: var(--color-primary);
-    border-color: var(--color-primary);
+/* 中屏：侧栏收窄，避免中间对话列被压到 500px 以下 */
+@media (max-width: 1200px) {
+    .studio-aside.left { width: 220px; }
+    .studio-aside.right { width: 250px; }
+    .bar-session { max-width: 160px; }
 }
 
-.left-toggle {
-    left: 8px;
-}
+/* 窄屏：双侧栏改覆盖式抽屉，中间只留一条主内容列 */
+@media (max-width: 768px) {
+    .studio-aside {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        z-index: 25;
+        width: min(84vw, 300px);
+        box-shadow: var(--shadow-lg);
+        transition: transform var(--transition-base);
+    }
 
-.right-toggle {
-    right: 8px;
+    .studio-aside.left { left: 0; }
+    .studio-aside.right { right: 0; }
+
+    .studio-aside.left.collapsed,
+    .studio-aside.right.collapsed {
+        width: min(84vw, 300px);
+        border: none;
+    }
+
+    .studio-aside.left.collapsed { transform: translateX(-100%); }
+    .studio-aside.right.collapsed { transform: translateX(100%); }
+
+    .studio-bar { padding: 0 var(--space-3); }
+    .bar-divider,
+    .bar-session,
+    .bar-model { display: none; }
+    .bar-nav-label { display: inline; }
+    .bar-model-chip {
+        display: inline-block;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--color-primary-lighter);
+        color: var(--color-primary);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+    }
 }
 </style>

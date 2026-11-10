@@ -1,5 +1,6 @@
 <!-- 模型广场页面：筛选侧栏 + 卡片网格 + 详情/添加抽屉的编排层 -->
 <!-- 各区块的实现拆分在 components/models/ 下：ModelFilterAside / ModelCard / ModelDetailDrawer / ModelAddDrawer -->
+<!-- 改版：页头左对齐、已选筛选条件显示在主内容区、网格不再硬封顶 4 列；≤768px 筛选侧栏改抽屉。 -->
 
 <template>
   <div class="models-page">
@@ -18,16 +19,11 @@
         @add="addModelDrawerVisible = true"
     />
 
-    <!-- 【右侧主内容】标题、卡片网格、翻页器 -->
-    <div class="models-content">
-      <!-- 侧栏折叠开关（与工坊两侧折叠按钮同款），存在筛选条件时高亮 -->
-      <button class="models-toggle" :class="{active: hasActiveFilter}"
-              :title="filterCollapsed ? '展开' : '折叠'"
-              @click="filterCollapsed = !filterCollapsed">
-        <icon-left v-if="!filterCollapsed"/>
-        <icon-right v-else/>
-      </button>
+    <!-- 抽屉遮罩：仅窄屏筛选面板以覆盖层形式出现时生效 -->
+    <div v-if="isNarrow && !filterCollapsed" class="models-mask" @click="filterCollapsed = true"/>
 
+    <!-- 【右侧主内容】标题、筛选状态、卡片网格、翻页器 -->
+    <div class="models-content">
       <header class="page-head models-head">
         <h1>模型广场</h1>
         <p class="page-head-desc">
@@ -35,6 +31,23 @@
           <span class="models-count models-count-free">{{ freeModelNumber }}</span> 个免费模型
         </p>
       </header>
+
+      <!-- 筛选状态条：结果数 + 已选条件（可逐个清除）+ 筛选面板入口 -->
+      <div class="models-toolbar">
+        <span class="toolbar-count">{{ filteredModelNumber }} 个结果</span>
+        <div class="active-chips">
+          <button v-for="chip in activeFilterChips" :key="chip.key" class="filter-chip"
+                  :title="`清除「${chip.label}」`" @click="chip.clear()">
+            {{ chip.label }} <span class="chip-x">×</span>
+          </button>
+          <span v-if="!activeFilterChips.length" class="chips-empty">未设置筛选条件</span>
+        </div>
+        <button class="filter-entry" :class="{active: !filterCollapsed}"
+                @click="filterCollapsed = !filterCollapsed">
+          {{ filterCollapsed ? '展开筛选' : '收起筛选' }}
+          <span v-if="activeFilterCount" class="filter-entry-count">{{ activeFilterCount }}</span>
+        </button>
+      </div>
 
       <!-- 【页面主体】模型卡片网格 -->
       <div class="model-list">
@@ -81,7 +94,7 @@
 
 <script setup lang="ts">
 
-import {reactive, ref, computed, watch, onMounted} from 'vue'
+import {reactive, ref, computed, watch, onMounted, onBeforeUnmount} from 'vue'
 import {Message} from '@arco-design/web-vue'
 import {addModel, updateModel, deleteModel} from '@/api/models'
 import {getErrorMessage} from '@/api/request'
@@ -117,7 +130,7 @@ const pageInfo = reactive({
   currentModelName: ""
 })
 
-// 侧栏折叠开关（默认展开：搜索框在侧栏里，收起会让用户找不到搜索入口）
+// 侧栏折叠开关（桌面默认展开；窄屏由视口同步为收起）
 const filterCollapsed = ref(false)
 
 // 筛选状态
@@ -127,7 +140,7 @@ const filterState = reactive({
   visionOnly: false,          // 仅视觉模型
 })
 
-// 当前激活的筛选条件数（含关键字搜索，决定折叠开关高亮）
+// 当前激活的筛选条件数（含关键字搜索，决定入口角标）
 const activeFilterCount = computed(() => {
   let n = 0
   if (pageInfo.currentModelName.trim()) n++
@@ -136,7 +149,43 @@ const activeFilterCount = computed(() => {
   if (filterState.visionOnly) n++
   return n
 })
-const hasActiveFilter = computed(() => activeFilterCount.value > 0)
+
+// 已选筛选条件：直接显示在主内容区，点击 chip 即清除对应条件
+const activeFilterChips = computed(() => {
+  const chips: Array<{key: string; label: string; clear: () => void}> = []
+  const kw = pageInfo.currentModelName.trim()
+  if (kw) {
+    chips.push({key: 'keyword', label: `名称：${kw}`, clear: () => { pageInfo.currentModelName = '' }})
+  }
+  if (filterState.group !== 'all') {
+    chips.push({key: 'group', label: `分组：${filterState.group}`, clear: () => { filterState.group = 'all' }})
+  }
+  filterState.labels.forEach(label => {
+    chips.push({
+      key: `label-${label}`,
+      label,
+      clear: () => { filterState.labels = filterState.labels.filter(l => l !== label) },
+    })
+  })
+  if (filterState.visionOnly) {
+    chips.push({key: 'vision', label: '仅视觉模型', clear: () => { filterState.visionOnly = false }})
+  }
+  return chips
+})
+
+/** ═══════════ 视口同步：窄屏把筛选侧栏改成抽屉 ═══════════ */
+const isNarrow = ref(false)
+let narrowQuery: MediaQueryList | null = null
+let viewportReady = false
+
+function syncViewport() {
+  const narrow = narrowQuery?.matches ?? false
+  if (!viewportReady || narrow !== isNarrow.value) {
+    viewportReady = true
+    isNarrow.value = narrow
+    filterCollapsed.value = narrow
+  }
+}
 
 // 根据筛选状态过滤后的模型列表
 const filteredModelList = computed(() => {
@@ -294,9 +343,16 @@ const handleDeleteModel = async (modelName: string) => {
   }
 }
 
-// 页面加载时拉取渠道列表，供抽屉内渠道下拉多选使用
+// 页面加载时拉取渠道列表，供抽屉内渠道下拉多选使用；同时初始化视口状态
 onMounted(() => {
+  narrowQuery = window.matchMedia('(max-width: 768px)')
+  syncViewport()
+  narrowQuery.addEventListener('change', syncViewport)
   channelList.loadTotalChannels()
+})
+
+onBeforeUnmount(() => {
+  narrowQuery?.removeEventListener('change', syncViewport)
 })
 
 
@@ -308,63 +364,32 @@ onMounted(() => {
   display: flex;
   height: 100%;
   overflow: hidden;
+  position: relative;
 }
 
 /* ── 右侧主内容列（滚动与内边距） ── */
 .models-content {
-  position: relative; /* 折叠开关按钮的定位锚点 */
   flex: 1;
   min-width: 0;
   height: 100%;
   overflow-y: auto;
-  padding: var(--space-5) var(--space-5) var(--space-6);
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  background: var(--color-bg-layout);
 }
 
-/* 侧栏折叠开关（照抄工坊 .panel-toggle） */
-.models-toggle {
-  position: absolute;
-  top: 10px;
-  left: 8px;
-  z-index: 10;
-  width: 22px;
-  height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background-color: var(--color-white);
-  color: var(--color-text-muted);
-  font-size: 14px;
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-}
-
-.models-toggle:hover {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-/* 存在筛选条件时高亮，提示侧栏里有未清除的条件 */
-.models-toggle.active {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-/* ── 页面头 ── */
+/* ── 页面头：左对齐，与控制台其它页一致 ── */
 .models-head {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-2);
-  text-align: center;
-  margin-bottom: var(--space-5);
+  align-items: flex-start;
+  gap: var(--space-1);
+  text-align: left;
+  margin-bottom: var(--space-4);
 }
 
 .models-head h1 {
   margin: 0;
-  font-size: var(--text-xl);
+  font-size: var(--text-page-title);
   font-weight: var(--font-semibold);
 }
 
@@ -377,14 +402,102 @@ onMounted(() => {
   color: var(--color-success);
 }
 
-/* ── 卡片网格 ── */
-/* 宽度封顶 1076px（4×260 卡片 + 3×12 间距）：大屏恒定每行 4 张（默认一页 12 个 = 整 3 行），
-   窄屏沿 auto-fill 自然降级 3→2→1 列；页头与分页器本就居中，网格同样居中对齐 */
+/* ── 筛选状态条 ── */
+.models-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+}
+
+.toolbar-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.active-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.chips-empty {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.filter-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.chip-x {
+  color: var(--color-text-muted);
+}
+
+.filter-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-lighter);
+  color: var(--color-primary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter-entry.active {
+  border-color: var(--color-primary-light);
+}
+
+.filter-entry-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 卡片网格：不再写死 1076px 四列封顶，大屏自然增列、窄屏自然降列 ── */
 .model-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--space-3);
-  max-width: 1076px;
+  max-width: 1440px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -398,5 +511,31 @@ onMounted(() => {
 
 .models-empty {
   padding: var(--space-12) 0;
+}
+
+.models-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--color-black);
+  opacity: 0.32;
+}
+
+@media (max-width: 768px) {
+  .models-content {
+    padding: var(--space-4);
+  }
+
+  .models-head h1 {
+    font-size: var(--text-lg);
+  }
+
+  .model-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-entry {
+    margin-left: auto;
+  }
 }
 </style>

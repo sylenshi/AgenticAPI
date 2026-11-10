@@ -173,4 +173,38 @@ function resetFilters() {
 .filter-section :deep(.arco-select-view-multiple) {
   width: 100%;
 }
+
+/* 中屏：侧栏略收窄，给卡片网格留出至少两列的宽度 */
+@media (min-width: 769px) and (max-width: 1100px) {
+  .filter-aside,
+  .filter-aside-inner {
+    width: 190px;
+  }
+}
+
+/* 窄屏：筛选侧栏改覆盖式抽屉，由主内容区的「展开筛选」按钮唤出 */
+@media (max-width: 768px) {
+  .filter-aside {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 25;
+    width: min(84vw, 300px);
+    background: var(--color-white);
+    border-right: 1px solid var(--color-border);
+    box-shadow: var(--shadow-lg);
+    transition: transform var(--transition-base);
+  }
+
+  .filter-aside.collapsed {
+    width: min(84vw, 300px);
+    transform: translateX(-100%);
+    border-right: none;
+  }
+
+  .filter-aside-inner {
+    width: 100%;
+  }
+}
 </style>

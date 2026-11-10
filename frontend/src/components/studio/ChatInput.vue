@@ -34,7 +34,7 @@
             <template #icon>
               <icon-image/>
             </template>
-            上传图片
+            <span class="tool-label">上传图片</span>
           </a-button>
         </a-tooltip>
         <input ref="fileInputRef" type="file" accept="image/*" multiple hidden @change="handleFileChange"/>
@@ -45,7 +45,7 @@
             <template #icon>
               <icon-voice/>
             </template>
-            语音输入
+            <span class="tool-label">语音输入</span>
           </a-button>
         </a-tooltip>
 
@@ -57,15 +57,15 @@
             <template #icon>
               <icon-search/>
             </template>
-            联网搜索
+            <span class="tool-label">联网搜索</span>
             <span v-if="studioStore.enableSearch" class="search-label">已开启</span>
           </a-button>
         </a-tooltip>
       </div>
 
       <div class="toolbar-right">
-        <span class="input-hint">按 Enter 发送</span>
-        <a-button v-if="!studioStore.isStreaming" type="primary" size="small" :disabled="!canSend"
+        <span class="input-hint">Enter 发送 · Shift + Enter 换行</span>
+        <a-button v-if="!studioStore.isStreaming" type="primary" size="small" class="send-btn" :disabled="!canSend"
                   @click="trySend">
           <template #icon>
             <icon-send/>
@@ -109,7 +109,7 @@ const textareaRef = ref<HTMLTextAreaElement>()
 const fileInputRef = ref<HTMLInputElement>()
 
 const placeholder = computed(() =>
-    props.supportVision ? '请在此输入发送消息，支持图片、语音、联网搜索等…' : '请在此输入发送消息，支持语音、联网搜索等…',
+    props.supportVision ? '输入消息，Shift + Enter 换行…（可附图）' : '输入消息，Shift + Enter 换行…',
 )
 
 const canSend = computed(() =>
@@ -329,8 +329,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .chat-input {
   border-top: 1px solid var(--color-border);
-  background: var(--color-white);
-  padding: var(--space-2) var(--space-4) var(--space-2);
+  background: var(--color-bg-layout);
+  padding: var(--space-3) var(--space-5) var(--space-3);
 }
 
 /* 附件预览 */
@@ -406,16 +406,17 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 文本输入区 */
+/* 文本输入区：与欢迎页、消息列共用 720px 内容轴 */
 .input-textarea {
   display: block;
   width: 100%;
-  max-width: 780px;
+  max-width: var(--layout-studio-content);
   margin: 0 auto;
   box-sizing: border-box;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-white);
   font-size: var(--text-sm);
   font-family: inherit;
   line-height: 1.6;
@@ -434,19 +435,27 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-/* 工具栏 */
+/* 工具栏：工具组文字降权，发送按钮是这一行唯一的实心主色 */
 .toolbar-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  max-width: 780px;
-  margin: var(--space-1) auto 0;
+  gap: var(--space-2);
+  max-width: var(--layout-studio-content);
+  margin: var(--space-2) auto 0;
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+}
+
+.toolbar-left :deep(.arco-btn) {
+  padding: 0 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
 }
 
 .search-toggle.active {
@@ -462,15 +471,21 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.send-btn {
+  min-width: 72px;
 }
 
 .input-hint {
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
-/* 窄屏兜底（规范 §5）：三栏布局下中间聊天区可能被压到 400px 以下，
-   隐藏"按 Enter 发送"提示并允许工具栏换行，避免与发送按钮互相挤压 */
+/* 窄屏兜底：工具栏允许换行，隐藏快捷键提示，避免与发送按钮互相挤压 */
 @media (max-width: 960px) {
   .input-hint {
     display: none;
@@ -479,6 +494,29 @@ onBeforeUnmount(() => {
   .toolbar-row {
     flex-wrap: wrap;
     row-gap: var(--space-1);
+  }
+}
+
+@media (max-width: 768px) {
+  .chat-input {
+    padding: var(--space-2) var(--space-4) var(--space-3);
+  }
+
+  .toolbar-left {
+    gap: 0;
+  }
+
+  /* 窄屏只保留图标，三个文字按钮不再与发送按钮抢一行宽度 */
+  .tool-label {
+    display: none;
+  }
+
+  .toolbar-left :deep(.arco-btn) {
+    padding: 0 8px;
+  }
+
+  .input-textarea {
+    padding: var(--space-2);
   }
 }
 </style>
