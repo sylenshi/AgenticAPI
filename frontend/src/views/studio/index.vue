@@ -6,7 +6,7 @@
     <div class="studio-page">
         <!-- 左：会话侧边栏 -->
         <div class="studio-aside left" :class="{collapsed: !sidebarOpen}">
-            <SessionSidebar />
+            <SessionSidebar @close="sidebarOpen = false" />
         </div>
 
         <!-- 抽屉遮罩：仅窄屏双侧栏以覆盖层形式出现时生效 -->
@@ -248,9 +248,9 @@ async function handleRegenerate() {
     transition: width var(--transition-base);
 }
 
-/* 桌面三栏：左 240 / 中自适应 / 右 280，中间内容由各子组件统一限宽 720 */
+/* 桌面三栏：左侧面板与广场筛选栏共用令牌，中自适应 / 右 280，中间内容统一限宽 720 */
 .studio-aside.left {
-    width: 240px;
+    width: var(--layout-panel-aside);
     border-right: 1px solid var(--color-border);
 }
 
@@ -365,7 +365,7 @@ async function handleRegenerate() {
 
 /* 中屏：侧栏收窄，避免中间对话列被压到 500px 以下 */
 @media (max-width: 1200px) {
-    .studio-aside.left { width: 220px; }
+    .studio-aside.left { width: var(--layout-panel-aside-compact); }
     .studio-aside.right { width: 250px; }
     .bar-session { max-width: 160px; }
 }

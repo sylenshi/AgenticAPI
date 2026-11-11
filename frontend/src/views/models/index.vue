@@ -16,7 +16,10 @@
         :is-admin="userStore.isAdmin"
         :group-options="groupOptions"
         :label-options="labelOptions"
+        :result-count="filteredModelNumber"
+        :total-count="totalModelNumber"
         @add="addModelDrawerVisible = true"
+        @close="filterCollapsed = true"
     />
 
     <!-- 抽屉遮罩：仅窄屏筛选面板以覆盖层形式出现时生效 -->

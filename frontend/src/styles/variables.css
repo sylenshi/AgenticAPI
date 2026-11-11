@@ -90,6 +90,7 @@
     'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 
   /* 字号阶梯 */
+  --text-2xs: 0.625rem; /* 10px：侧栏元信息、计数徽标等辅助信息 */
   --text-xs: 0.75rem; /* 12px */
   --text-sm: 0.875rem; /* 14px */
   --text-base: 1rem; /* 16px */
@@ -163,6 +164,9 @@
   --layout-sidebar-width: 176px;  /* 原 120px，菜单文字不再拥挤 */
   /* 工坊内容轴：欢迎页 / 消息列 / 输入区三处共用的限宽，避免大屏拉出大片空白 */
   --layout-studio-content: 720px;
+  /* 两页左侧面板统一宽度（工坊会话侧栏 / 广场筛选侧栏），中屏收窄一档 */
+  --layout-panel-aside: 240px;
+  --layout-panel-aside-compact: 220px;
 
   /* ── 密度令牌（2026-11 新增，表格与控件统一从这里取值） ─────────────── */
   --density-row-padding: 4px;     /* 表格单元格上下 padding */
