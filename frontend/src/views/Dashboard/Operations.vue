@@ -82,8 +82,8 @@
         </template>
       </div>
 
-      <!-- Antigravity（Google Gemini PRO）：限额来自本机 Antigravity-Manager 容器的管理 API，
-           取 Gemini 模型组的 5 小时 + 周度窗口，与其他卡同一展示语言 -->
+      <!-- Antigravity（Google Gemini PRO）：限额来自本机 sub2api 容器的管理端 API（8080），
+           取 Gemini / Claude 两个池子各自的 5 小时 + 周度窗口，与其他卡同一展示语言 -->
       <div class="plan-card plan-card-ag">
         <div class="plan-card-head">
           <div class="plan-card-title">
@@ -100,7 +100,7 @@
         </a>
         <div v-if="agUsage.status !== 'ok'" class="error-text">{{ agUsage.status }}</div>
         <template v-else>
-          <plan-usage :usage="agUsage"/>
+          <ag-plan-usage :usage="agUsage"/>
         </template>
       </div>
 
@@ -231,6 +231,23 @@ const planUsage = defineComponent({
   },
 })
 
+/** Antigravity 卡的用量展示：上游按模型分 Gemini / Claude 两个池子，各带 5 小时 + 周度共 4 条进度条 */
+const agPlanUsage = defineComponent({
+  props: {
+    usage: {type: Object as () => antigravityUsageData, required: true},
+  },
+  setup(props) {
+    return () => h('div', {class: 'plan-rows'}, [
+      h('div', {class: 'plan-pool-title'}, 'Gemini 池'),
+      h(planWindowRow, {label: '5小时', window: props.usage.gemini.fiveHour}),
+      h(planWindowRow, {label: '周度', window: props.usage.gemini.weekly}),
+      h('div', {class: 'plan-pool-title'}, 'Claude 池'),
+      h(planWindowRow, {label: '5小时', window: props.usage.claude.fiveHour}),
+      h(planWindowRow, {label: '周度', window: props.usage.claude.weekly}),
+    ])
+  },
+})
+
 /* ═══════════════════════ 状态 ═══════════════════════ */
 
 const LS_SETTINGS = 'tokenplan_settings'
@@ -292,20 +309,16 @@ const zai2Usage = reactive<zai2UsageData>({
 })
 const agUsage = reactive<antigravityUsageData>({
   status: "请刷新用量",
-  fiveHour: {
-    used: 0,
-    quota: 0,
+  gemini: {
+    fiveHour: {used: 0, quota: 0},
+    weekly: {used: 0, quota: 0},
   },
-  weekly: {
-    used: 0,
-    quota: 0,
-  },
-  monthly: {
-    used: 0,
-    quota: 0,
+  claude: {
+    fiveHour: {used: 0, quota: 0},
+    weekly: {used: 0, quota: 0},
   },
 })
-const agLoading = ref(false) // Antigravity 实时拉取中（经 VPN 现查 Google，约 15s）
+const agLoading = ref(false) // Antigravity 用量拉取中（sub2api 缓存过期时需经 VPN 现查 Google，可达数秒）
 
 /* ═══════════════════════ 初始化 ═══════════════════════ */
 
@@ -415,18 +428,21 @@ const refreshZai2Usage = () => {
   })
 }
 
-// 把后端返回的 Antigravity 用量写入卡片状态（单卡刷新与全部刷新共用）
+// 把后端返回的 Antigravity 用量写入卡片状态（单卡刷新与全部刷新共用；Gemini/Claude 双池 × 5小时/周度）
 const applyAgUsage = (u: any) => {
   agUsage.status = "ok"
-  agUsage.fiveHour.used = u.agFiveHourUsed ?? 0
-  agUsage.fiveHour.quota = u.agFiveHourTotal ?? 0
-  agUsage.fiveHour.resetAt = u.agFiveHourResetAt ?? null
-  agUsage.weekly.used = u.agWeeklyUsed ?? 0
-  agUsage.weekly.quota = u.agWeeklyTotal ?? 0
-  agUsage.weekly.resetAt = u.agWeeklyResetAt ?? null
-  agUsage.monthly.used = u.agMonthlyUsed ?? 0
-  agUsage.monthly.quota = u.agMonthlyTotal ?? 0
-  agUsage.monthly.resetAt = u.agMonthlyResetAt ?? null
+  agUsage.gemini.fiveHour.used = u.agFiveHourUsed ?? 0
+  agUsage.gemini.fiveHour.quota = u.agFiveHourTotal ?? 0
+  agUsage.gemini.fiveHour.resetAt = u.agFiveHourResetAt ?? null
+  agUsage.gemini.weekly.used = u.agWeeklyUsed ?? 0
+  agUsage.gemini.weekly.quota = u.agWeeklyTotal ?? 0
+  agUsage.gemini.weekly.resetAt = u.agWeeklyResetAt ?? null
+  agUsage.claude.fiveHour.used = u.agClaudeFiveHourUsed ?? 0
+  agUsage.claude.fiveHour.quota = u.agClaudeFiveHourTotal ?? 0
+  agUsage.claude.fiveHour.resetAt = u.agClaudeFiveHourResetAt ?? null
+  agUsage.claude.weekly.used = u.agClaudeWeeklyUsed ?? 0
+  agUsage.claude.weekly.quota = u.agClaudeWeeklyTotal ?? 0
+  agUsage.claude.weekly.resetAt = u.agClaudeWeeklyResetAt ?? null
 }
 
 const refreshAgUsage = () => {
@@ -435,7 +451,7 @@ const refreshAgUsage = () => {
     if (res.data.status.antigravity === "200") {
       applyAgUsage(res.data.antigravity_usage)
     } else {
-      // 卡片已有数据时静默失败（实时拉取失败会回落缓存，不打断展示），否则显示错误
+      // 卡片已有数据时静默失败（保留上一次成功数据，不打断展示），否则显示错误
       if (agUsage.status !== 'ok') {
         agUsage.status = "数据刷新错误: " + res.data.status.antigravity
       }
@@ -512,11 +528,10 @@ const refreshAllUsage = () => {
   })
 }
 
-// 页面刚加载的时候刷新全部数据；Antigravity 缓存秒回后再后台补一次实时拉取（约 15s）
+// 页面刚加载的时候刷新全部数据（含 Antigravity：sub2api 服务端自带 3 分钟缓存，通常秒级返回）
 onMounted(() => {
   refreshAllUsage()
   loadSettings()
-  refreshAgUsage()
 })
 
 </script>
@@ -626,6 +641,14 @@ onMounted(() => {
   flex-direction: column;
   gap: var(--space-3);
   margin-top: var(--space-2);
+}
+
+/* Antigravity 卡的池子小标题（Gemini 池 / Claude 池分组） */
+:deep(.plan-pool-title) {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--color-text-secondary);
+  margin-top: var(--space-1);
 }
 
 :deep(.plan-row-head) {

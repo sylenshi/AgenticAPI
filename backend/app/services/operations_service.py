@@ -48,9 +48,11 @@ def get_operations(refresh_channel: str = "all") -> dict:
             operation_dict.get("zai_api_key") or zai_ops_setting.ZAI_API_KEY_2
     )
 
-    # Antigravity 的凭证在 .env（管理界面访问令牌，长期有效）
+    # Antigravity 的凭证在 .env（sub2api 管理员账号，登录换 JWT 查双池限额）
     operation_dict["antigravity_base_url"] = antigravity_ops_setting.ANTIGRAVITY_BASE_URL
-    operation_dict["antigravity_api_key"] = antigravity_ops_setting.ANTIGRAVITY_API_KEY
+    operation_dict["antigravity_admin_email"] = antigravity_ops_setting.ANTIGRAVITY_ADMIN_EMAIL
+    operation_dict["antigravity_admin_password"] = antigravity_ops_setting.ANTIGRAVITY_ADMIN_PASSWORD
+    operation_dict["antigravity_account_ids"] = antigravity_ops_setting.ANTIGRAVITY_ACCOUNT_IDS
 
     # 【1】火山方舟 Token Plan 用量
     if refresh_channel in ("vol", "all"):
@@ -78,13 +80,11 @@ def get_operations(refresh_channel: str = "all") -> dict:
         if result["raw"] is not None:
             _save_raw("zai2", result["raw"])
 
-    # 【4】Antigravity（Gemini PRO）限额（数据源为本机 Antigravity-Manager 容器的管理 API）。
-    # 实时限额需容器经 VPN 向 Google 现查（实测约 15s），只在单卡刷新时实时拉取；
-    # "all"/页面加载读容器缓存秒回，前端挂载后会自动补一次实时刷新。
+    # 【4】Antigravity（Gemini PRO）限额（数据源为本机 sub2api 容器的管理端 API，8080）。
+    # sub2api 服务端自带 3 分钟缓存（上游失败负缓存 1 分钟），查询通常秒级返回，
+    # 不再区分实时/缓存双速，单卡刷新与 "all" 走同一条路径。
     if refresh_channel in ("antigravity", "all"):
-        result = antigravity.fetch_antigravity_usage(
-            operation_dict, live=(refresh_channel == "antigravity")
-        )
+        result = antigravity.fetch_antigravity_usage(operation_dict)
         re_dict["status"]["antigravity"] = result["status"]
         re_dict["antigravity_usage"] = result["usage"]
         if result["raw"] is not None:

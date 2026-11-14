@@ -95,7 +95,9 @@ class ZaiOpsSettings(BaseSettings):
 class AntigravityOpsSettings(BaseSettings):
     """Antigravity（Gemini PRO）限额监控专用配置
 
-    数据源是同机回环的 Antigravity-Manager 容器管理 API，密钥即管理界面访问令牌（长期有效）。
+    数据源是同机回环的 sub2api 容器管理端 API（订阅转 API 网关，端口 8080）：
+    管理员邮箱+密码登录换 JWT（24h 有效、登录接口限流，token 由适配器缓存复用），
+    再批量查询账号的 antigravity 分组配额（Gemini/Claude 双池 × 5 小时/周度窗口）。
     """
 
     model_config = SettingsConfigDict(
@@ -104,10 +106,13 @@ class AntigravityOpsSettings(BaseSettings):
         extra='ignore', # 忽略 .env 中未定义的变量
     )
 
-    # 容器管理 API 地址（同机部署用默认回环地址即可）
-    ANTIGRAVITY_BASE_URL: str = "http://127.0.0.1:8045"
-    # 管理界面的访问令牌（WEB_PASSWORD），以 Authorization: Bearer 头鉴权
-    ANTIGRAVITY_API_KEY: str = ""
+    # sub2api 管理 API 地址（同机部署用默认回环地址即可；本地开发经 SSH 隧道映射）
+    ANTIGRAVITY_BASE_URL: str = "http://127.0.0.1:8080"
+    # sub2api 管理员账号（与 Web 后台同款），用于登录换管理端 JWT
+    ANTIGRAVITY_ADMIN_EMAIL: str = ""
+    ANTIGRAVITY_ADMIN_PASSWORD: str = ""
+    # 查询的 sub2api 账号 ID（逗号分隔；多账号时各窗口取最大利用率保守展示）
+    ANTIGRAVITY_ACCOUNT_IDS: str = "1"
 
 
 class SandboxSettings(BaseSettings):

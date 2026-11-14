@@ -27,13 +27,18 @@ export interface zai2UsageData {
     monthly: usageWindow
 }
 
-// Antigravity（Google Gemini PRO）的限额数据：配额以模型组为单位（组内文本模型额度共享），
-// 后端取 Gemini 组的 5 小时 + 周度两个窗口（quota_groups 的 remaining_fraction 换算已用百分比），无月度限额
-export interface antigravityUsageData {
-    status: string;
+// Antigravity（Google Gemini PRO 订阅，经 sub2api 网关查询）的限额数据：上游按模型分两个池子
+// （gemini = Gemini 池、3p = Claude 池），每池各有 5 小时 + 周度两个窗口（utilization 已由后端
+// 换算为已用百分比，Total 恒为 100），上游无月度窗口
+export interface antigravityPoolUsage {
     fiveHour: usageWindow
     weekly: usageWindow
-    monthly: usageWindow
+}
+
+export interface antigravityUsageData {
+    status: string;
+    gemini: antigravityPoolUsage
+    claude: antigravityPoolUsage
 }
 
 // 数据接口定义，向后端发送凭证信息

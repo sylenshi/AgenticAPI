@@ -41,17 +41,22 @@ export interface zaiUsageDetail {
     zaiMonthlyResetAt: string | null
 }
 
-/** Antigravity 用量段 */
+/** Antigravity 用量段（Gemini 池 + Claude 池，各 5小时/周度窗口，百分比语义） */
 export interface agUsageDetail {
+    // Gemini 池
     agFiveHourUsed: number
-    agWeeklyUsed: number
-    agMonthlyUsed: number
     agFiveHourTotal: number
-    agWeeklyTotal: number
-    agMonthlyTotal: number
     agFiveHourResetAt: string | null
+    agWeeklyUsed: number
+    agWeeklyTotal: number
     agWeeklyResetAt: string | null
-    agMonthlyResetAt: string | null
+    // Claude 池
+    agClaudeFiveHourUsed: number
+    agClaudeFiveHourTotal: number
+    agClaudeFiveHourResetAt: string | null
+    agClaudeWeeklyUsed: number
+    agClaudeWeeklyTotal: number
+    agClaudeWeeklyResetAt: string | null
 }
 
 /** GET /operations/get 响应 data：外层段名为后端现状的蛇形，叶子键为驼峰 */

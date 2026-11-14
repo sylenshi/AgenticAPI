@@ -502,6 +502,9 @@ mp3），成功返回：
 
 `/operations/get` 的 `data` 外层段名为蛇形（`status` / `vol_usage` / `stepfun_usage` / `zai2_usage` / `antigravity_usage`），
 各段叶子键为驼峰；单渠道失败只影响自己的段（`status` 非 `"200"`），不影响其他渠道。
+`antigravity_usage` 段为 Antigravity 订阅（Google Gemini PRO，经 sub2api 网关查询）的双池限额：
+Gemini 池 `agFiveHour*` / `agWeekly*` + Claude 池 `agClaudeFiveHour*` / `agClaudeWeekly*`，
+各含 `Used` / `Total` / `ResetAt` 三件套（百分比语义，`Total` 恒为 100；上游无月度窗口）。
 
 ### 3.11 站内维护 Agent
 
