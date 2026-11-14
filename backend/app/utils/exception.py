@@ -1,3 +1,4 @@
+import logging
 import traceback
 
 from fastapi import Request
@@ -12,6 +13,10 @@ from app.core.config import setting
 # 开发模式：返回详细错误信息；生产模式：返回简化错误信息
 # 跟 .env 的 DEBUG 走（本地开发 true，生产 false），避免堆栈 / SQL 原文泄露给客户端
 DEBUG_MODE = setting.DEBUG
+
+# 500 类异常统一走 uvicorn.error logger（uvicorn 运行时必有 handler，输出进 journald）：
+# 生产 DEBUG=false 时响应体不带细节，这里的事件日志是唯一的排障入口
+logger = logging.getLogger("uvicorn.error")
 
 # 走 OpenAI 报文风格的端点（规范 §1 例外条款）：失败一律返回 {"error": {...}}，
 # 包括路由未匹配 404 / 方法不允许 405 / 鉴权依赖抛出的 401 等
@@ -119,6 +124,9 @@ async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     """
     处理 SQLAlchemy 数据库错误
     """
+    # 完整堆栈进日志（journald 可查），生产模式响应体不带细节
+    logger.exception("数据库异常 500：%s %s", request.method, request.url.path)
+
     # 开发模式下返回详细错误信息
     error_data = None
     if DEBUG_MODE:
@@ -144,6 +152,9 @@ async def general_exception_handler(request: Request, exc: Exception):
     """
     处理所有未捕获的异常
     """
+    # 完整堆栈进日志（journald 可查），生产模式响应体不带细节
+    logger.exception("未捕获异常 500：%s %s", request.method, request.url.path)
+
     # 开发模式下返回详细错误信息
     error_data = None
     if DEBUG_MODE:

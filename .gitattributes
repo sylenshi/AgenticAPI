@@ -1,0 +1,2 @@
+# shell 脚本一律 LF：cron/bash 在 Linux 服务器上执行，CRLF 会导致 bad interpreter
+*.sh text eol=lf
