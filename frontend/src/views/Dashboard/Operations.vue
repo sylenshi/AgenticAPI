@@ -82,12 +82,12 @@
         </template>
       </div>
 
-      <!-- Antigravity（Google Gemini PRO）：限额来自本机 sub2api 容器的管理端 API（8080），
-           取 Gemini / Claude 两个池子各自的 5 小时 + 周度窗口，与其他卡同一展示语言 -->
+      <!-- Antigravity 订阅（Google Gemini PRO）拆成 Gemini / Claude 两张卡：同一订阅的两个模型池，
+           限额来自本机 sub2api 容器的管理端 API（8080），各展示 5 小时 + 周度窗口，与其他卡同一展示语言 -->
       <div class="plan-card plan-card-ag">
         <div class="plan-card-head">
           <div class="plan-card-title">
-            <span>Antigravity</span>
+            <span>Gemini</span>
             <a-tag size="small" color="green">Gemini PRO</a-tag>
           </div>
           <a-button type="text" size="small" :loading="agLoading" @click="refreshAgUsage">
@@ -100,7 +100,27 @@
         </a>
         <div v-if="agUsage.status !== 'ok'" class="error-text">{{ agUsage.status }}</div>
         <template v-else>
-          <ag-plan-usage :usage="agUsage"/>
+          <ag-pool-usage :pool="agUsage.gemini"/>
+        </template>
+      </div>
+
+      <div class="plan-card plan-card-ag">
+        <div class="plan-card-head">
+          <div class="plan-card-title">
+            <span>Claude</span>
+            <a-tag size="small" color="green">Gemini PRO</a-tag>
+          </div>
+          <a-button type="text" size="small" :loading="agLoading" @click="refreshAgUsage">
+            <template #icon><icon-sync/></template>
+            刷新
+          </a-button>
+        </div>
+        <a class="plan-link" href="https://antigravity.google" target="_blank">
+          官方订阅链接<icon-launch/>
+        </a>
+        <div v-if="agUsage.status !== 'ok'" class="error-text">{{ agUsage.status }}</div>
+        <template v-else>
+          <ag-pool-usage :pool="agUsage.claude"/>
         </template>
       </div>
 
@@ -168,7 +188,8 @@ import type {
   volUsageData,
   stepfunUsageData,
   zai2UsageData,
-  antigravityUsageData
+  antigravityUsageData,
+  antigravityPoolUsage
 } from '@/types'
 
 /* ═══════════════════════ 用量卡片公共部分（5小时/周/月进度条） ═══════════════════════ */
@@ -231,19 +252,15 @@ const planUsage = defineComponent({
   },
 })
 
-/** Antigravity 卡的用量展示：上游按模型分 Gemini / Claude 两个池子，各带 5 小时 + 周度共 4 条进度条 */
-const agPlanUsage = defineComponent({
+/** Antigravity 卡的用量展示：单池两行进度条（5小时 + 周度），Gemini / Claude 两张卡共用 */
+const agPoolUsage = defineComponent({
   props: {
-    usage: {type: Object as () => antigravityUsageData, required: true},
+    pool: {type: Object as () => antigravityPoolUsage, required: true},
   },
   setup(props) {
     return () => h('div', {class: 'plan-rows'}, [
-      h('div', {class: 'plan-pool-title'}, 'Gemini 池'),
-      h(planWindowRow, {label: '5小时', window: props.usage.gemini.fiveHour}),
-      h(planWindowRow, {label: '周度', window: props.usage.gemini.weekly}),
-      h('div', {class: 'plan-pool-title'}, 'Claude 池'),
-      h(planWindowRow, {label: '5小时', window: props.usage.claude.fiveHour}),
-      h(planWindowRow, {label: '周度', window: props.usage.claude.weekly}),
+      h(planWindowRow, {label: '5小时', window: props.pool.fiveHour}),
+      h(planWindowRow, {label: '周度', window: props.pool.weekly}),
     ])
   },
 })
@@ -641,14 +658,6 @@ onMounted(() => {
   flex-direction: column;
   gap: var(--space-3);
   margin-top: var(--space-2);
-}
-
-/* Antigravity 卡的池子小标题（Gemini 池 / Claude 池分组） */
-:deep(.plan-pool-title) {
-  font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
-  color: var(--color-text-secondary);
-  margin-top: var(--space-1);
 }
 
 :deep(.plan-row-head) {

@@ -7,6 +7,7 @@ export type {
     stepfunUsageData,
     zai2UsageData,
     antigravityUsageData,
+    antigravityPoolUsage,
     cookieSettings,
 } from './operations'
 export type {
